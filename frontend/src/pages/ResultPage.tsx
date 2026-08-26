@@ -1,4 +1,4 @@
-import { Link } from 'react-router-dom'
+import { Link } from "react-router-dom";
 
 function ResultPage() {
   return (
@@ -6,7 +6,7 @@ function ResultPage() {
       <h1>リザルト</h1>
       <Link to="/ranking">ランキングへ</Link>
     </section>
-  )
+  );
 }
 
-export default ResultPage
+export default ResultPage;

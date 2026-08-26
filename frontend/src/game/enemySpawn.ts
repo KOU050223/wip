@@ -11,12 +11,12 @@ let enemyIdCounter = 0;
  * 将来的にウェーブ制やスポーンパターンを追加する場合はここを拡張する。
  */
 export function spawnEnemy(
-position: Vector3,
-options?: { maxHp?: number; hitRadius?: number }
+  position: Vector3,
+  options?: { maxHp?: number; hitRadius?: number },
 ): Enemy {
   const maxHp = options?.maxHp ?? 1; // 最初はHP=1で「1発で倒せる」構成
 
-return {
+  return {
     id: `enemy-${enemyIdCounter++}`,
     position,
     hp: maxHp,
@@ -24,7 +24,7 @@ return {
     state: "idle",
     spawnedAt: performance.now(),
     hitRadius: options?.hitRadius ?? 0.5,
-};
+  };
 }
 
 /**
@@ -32,15 +32,15 @@ return {
  * ゲームループ側で毎フレーム呼び、trueが返ったタイミングでspawnEnemyを呼ぶ想定。
  */
 export function createSpawnTimer(intervalMs: number) {
-let lastSpawnAt = 0;
+  let lastSpawnAt = 0;
 
-return function shouldSpawn(now: number): boolean {
+  return function shouldSpawn(now: number): boolean {
     if (now - lastSpawnAt >= intervalMs) {
-    lastSpawnAt = now;
-    return true;
+      lastSpawnAt = now;
+      return true;
     }
     return false;
-};
+  };
 }
 
 /**

@@ -1,42 +1,25 @@
-# EXAMPLE USAGE:
-#
-#   Refer for explanation to following link:
-#   https://lefthook.dev/configuration/
-#
-# pre-push:
-#   jobs:
-#     - name: packages audit
-#       tags:
-#         - frontend
-#         - security
-#       run: yarn audit
-#
-#     - name: gems audit
-#       tags:
-#         - backend
-#         - security
-#       run: bundle audit
-#
-# pre-commit:
-#   parallel: true
-#   jobs:
-#     - run: yarn eslint {staged_files}
-#       glob: "*.{js,ts,jsx,tsx}"
-#
-#     - name: rubocop
-#       glob: "*.rb"
-#       exclude:
-#         - config/application.rb
-#         - config/routes.rb
-#       run: bundle exec rubocop --force-exclusion -- {all_files}
-#
-#     - name: govet
-#       files: git ls-files -m
-#       glob: "*.go"
-#       run: go vet -- {files}
-#
-#     - script: "hello.js"
-#       runner: node
-#
-#     - script: "hello.go"
-#       runner: go run
+pre-commit:
+  parallel: true
+  commands:
+    frontend-lint:
+      glob: "frontend/**/*.{js,jsx,ts,tsx}"
+      run: cd frontend && npm run lint
+    backend-format:
+      glob: "backend/**/*.go"
+      run: test -z "$(gofmt -l backend)"
+    backend-vet:
+      glob: "backend/**/*.go"
+      run: cd backend && go vet ./...
+
+pre-push:
+  parallel: true
+  commands:
+    frontend-test:
+      glob: "frontend/**/*.{css,html,js,jsx,json,ts,tsx}"
+      run: cd frontend && npm test
+    frontend-build:
+      glob: "frontend/**/*.{css,html,js,jsx,json,ts,tsx}"
+      run: cd frontend && npm run build
+    backend-test:
+      glob: "backend/**/*.go"
+      run: cd backend && go test ./...

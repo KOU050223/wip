@@ -1,4 +1,4 @@
-import { Link } from 'react-router-dom'
+import { Link } from "react-router-dom";
 
 function TitlePage() {
   return (
@@ -6,7 +6,7 @@ function TitlePage() {
       <h1>タイトル</h1>
       <Link to="/connect">はじめる</Link>
     </section>
-  )
+  );
 }
 
-export default TitlePage
+export default TitlePage;
