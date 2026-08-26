@@ -1,8 +1,8 @@
 import { Link } from 'react-router-dom'
-import { useJoyCon } from '../hooks/useJoyCon'
+import { useJoyConContext } from '../contexts/JoyConContext'
 
 function ConnectPage() {
-  const { isSupported, isConnected, state, error, connect } = useJoyCon()
+  const { isSupported, isConnected, state, error, connect } = useJoyConContext()
 
   return (
     <section>
