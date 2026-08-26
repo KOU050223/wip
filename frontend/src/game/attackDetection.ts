@@ -38,7 +38,7 @@ return closest;
  * 振り強度から与ダメージを算出する。
  * 最初は固定ダメージでよいが、強く振るほどダメージが増える形にも拡張できる。
  */
-export function calculateDamage(swingPower: number, baseDamage: number = 1): number {
+export function calculateDamage(_swingPower: number, baseDamage: number = 1): number {
 return baseDamage;
   // 拡張例: return Math.round(baseDamage * Math.min(swingPower / SWING_POWER_THRESHOLD, 2));
 }
