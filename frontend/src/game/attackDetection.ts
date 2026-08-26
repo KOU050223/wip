@@ -13,25 +13,25 @@ const SWING_POWER_THRESHOLD = 1.2; // Joy-Conの振り強度の閾値(要チュ�
  * 複数の敵が同時に範囲内にいる場合は、最も近い敵を優先する。
  */
 export function checkHit(
-saberTipPosition: Vector3,
-swingPower: number,
-enemies: Enemy[]
+  saberTipPosition: Vector3,
+  swingPower: number,
+  enemies: Enemy[],
 ): Enemy | null {
-if (swingPower < SWING_POWER_THRESHOLD) return null;
+  if (swingPower < SWING_POWER_THRESHOLD) return null;
 
-let closest: Enemy | null = null;
-let closestDistance = Infinity;
+  let closest: Enemy | null = null;
+  let closestDistance = Infinity;
 
-for (const enemy of enemies) {
+  for (const enemy of enemies) {
     if (enemy.state !== "idle") continue;
     const distance = saberTipPosition.distanceTo(enemy.position);
     if (distance <= enemy.hitRadius && distance < closestDistance) {
-    closest = enemy;
-    closestDistance = distance;
+      closest = enemy;
+      closestDistance = distance;
     }
-}
+  }
 
-return closest;
+  return closest;
 }
 
 /**
@@ -39,6 +39,6 @@ return closest;
  * 最初は固定ダメージでよいが、強く振るほどダメージが増える形にも拡張できる。
  */
 export function calculateDamage(_swingPower: number, baseDamage: number = 1): number {
-return baseDamage;
+  return baseDamage;
   // 拡張例: return Math.round(baseDamage * Math.min(swingPower / SWING_POWER_THRESHOLD, 2));
 }

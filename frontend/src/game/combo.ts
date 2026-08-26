@@ -1,12 +1,12 @@
 // combo.ts
 // コンボ管理ロジック
 
-import type{ ComboState } from "./types";
+import type { ComboState } from "./types";
 
 const COMBO_RESET_MS = 1500; // この時間ヒットがないとコンボが切れる
 
 export function createInitialComboState(): ComboState {
-return { combo: 0, score: 0, lastHitAt: 0 };
+  return { combo: 0, score: 0, lastHitAt: 0 };
 }
 
 /**
@@ -14,14 +14,14 @@ return { combo: 0, score: 0, lastHitAt: 0 };
  * スコア加算はscore.tsのcalculateScoreに委ねる想定なので、ここではcomboの更新のみ返す。
  */
 export function registerHit(state: ComboState, now: number): ComboState {
-const isComboContinued = now - state.lastHitAt <= COMBO_RESET_MS;
-const nextCombo = isComboContinued ? state.combo + 1 : 1;
+  const isComboContinued = now - state.lastHitAt <= COMBO_RESET_MS;
+  const nextCombo = isComboContinued ? state.combo + 1 : 1;
 
-return {
+  return {
     ...state,
     combo: nextCombo,
     lastHitAt: now,
-};
+  };
 }
 
 /**
@@ -29,12 +29,12 @@ return {
  * 切れた場合は呼び出し側で comboReset イベントを発火するとよい。
  */
 export function checkComboTimeout(state: ComboState, now: number): ComboState {
-if (state.combo > 0 && now - state.lastHitAt > COMBO_RESET_MS) {
+  if (state.combo > 0 && now - state.lastHitAt > COMBO_RESET_MS) {
     return { ...state, combo: 0 };
-}
-return state;
+  }
+  return state;
 }
 
 export function resetCombo(state: ComboState): ComboState {
-return { ...state, combo: 0 };
+  return { ...state, combo: 0 };
 }

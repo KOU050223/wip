@@ -1,9 +1,9 @@
-import { Link } from 'react-router-dom'
-import LightsaberScene from '../components/three/LightsaberScene'
-import { useJoyConContext } from '../contexts/JoyConContext'
+import { Link } from "react-router-dom";
+import LightsaberScene from "../components/three/LightsaberScene";
+import { useJoyConContext } from "../contexts/JoyConContext";
 
 function GamePage() {
-  const { isConnected, state } = useJoyConContext()
+  const { isConnected, state } = useJoyConContext();
 
   return (
     <section>
@@ -15,7 +15,7 @@ function GamePage() {
 
       <Link to="/result">リザルトへ</Link>
     </section>
-  )
+  );
 }
 
-export default GamePage
+export default GamePage;

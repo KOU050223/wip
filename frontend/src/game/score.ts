@@ -16,5 +16,5 @@ export function calculateHitScore(combo: number): number {
  * スコアを加算した新しい合計値を返す。
  */
 export function addScore(currentScore: number, combo: number): number {
-return currentScore + calculateHitScore(combo);
+  return currentScore + calculateHitScore(combo);
 }
