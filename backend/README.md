@@ -14,24 +14,23 @@ Repository（DBアクセス）
 PostgreSQL
 ```
 
-## HTTP基盤・ルーターの候補
+## HTTP基盤・ルーター
 
-| 選択肢 | 特徴 | 確認すること |
+HTTP基盤・ルーターは Gin を採用予定です。
+
+| 採用予定 | 特徴 | 採用理由 |
 | --- | --- | --- |
-| [net/http](https://pkg.go.dev/net/http) | Go標準ライブラリだけでHTTPサーバーを作る。依存が少なく、HTTPの基礎を理解しやすい。 | 小規模なAPIを標準ライブラリだけで実装・保守できるか。 |
-| [chi](https://github.com/go-chi/chi) | `net/http` と互換性のある、軽量で組み合わせやすいルーター。 | 標準ライブラリに近い書き味のまま、ルーティングとミドルウェアを整理したいか。 |
-| [Gin](https://github.com/gin-gonic/gin) | ルーティング、JSONバインド・バリデーション、ミドルウェアをまとめて使えるWebフレームワーク。 | チュートリアルやチーム内の利用経験を活かし、素早くAPIを作りたいか。 |
-| [Echo](https://echo.labstack.com/) | ルーティング、バインド、バリデーション、ミドルウェアを提供するWebフレームワーク。 | EchoのAPIや周辺ライブラリがチームに合うか。 |
+| [Gin](https://github.com/gin-gonic/gin) | ルーティング、JSONバインド・バリデーション、ミドルウェアをまとめて使えるWebフレームワーク。 | 最小限の記述でHTTP APIを作りやすく、MVPで必要な `GET /health`、`POST /api/scores`、`GET /api/rankings` を素早く実装できる。 |
 
-`net/http` は標準ライブラリ、chiはその上に組み合わせるルーターです。Gin / Echoは、ルーティング等をまとめて提供するフレームワークです。この中からHTTPの入口を一つ選ぶ。
+`net/http` や chi よりもフレームワーク側の機能がまとまっているため、まずはGinで実装速度とわかりやすさを優先する。将来的にWebSocketを入れる場合も、HTTPの入口はGinに集約する。
 
-## DBアクセスの候補
+## DBアクセス
 
-| 選択肢 | 特徴 | 確認すること |
+DBアクセスは GORM を採用予定です。
+
+| 採用予定 | 特徴 | 採用理由 |
 | --- | --- | --- |
-| [`database/sql` + pgx](https://github.com/jackc/pgx) | 標準的なSQLインターフェースとPostgreSQLドライバを使う。SQLを自分で書く。 | SQLを学びながら、依存を少なく明示的に実装したいか。 |
-| [sqlc](https://sqlc.dev/) | 書いたSQLから型安全なGoコードを生成する。 | SQLを主役にしつつ、手書きのスキャン処理を減らしたいか。 |
-| [GORM](https://gorm.io/) | Goの構造体を中心にDB操作できるORM。 | SQLよりGoのコードでCRUDを素早く書きたいか。複雑なSQLが必要になったときの扱いも確認する。 |
+| [GORM](https://gorm.io/) | Goの構造体を中心にDB操作できるORM。 | スコア保存・ランキング取得のCRUDを短く書きやすく、Repository層の実装をシンプルに保ちやすい。複雑な集計が必要になった場合は、生SQLやクエリビルダーの併用を検討する。 |
 
 最初に必要なテーブルはスコアだけでよい。
 
@@ -54,14 +53,14 @@ scores
 
 MVPではHTTP APIのみでもよい。WebSocketを使う場合は、Room管理、切断、再接続、メッセージ形式まで設計対象に含める。
 
-## 選定タスク
+## 実装タスク
 
-担当者は、以下を決めてPRまたはIssueに残す。
+担当者は、以下を実装してPRまたはIssueに残す。
 
-1. HTTP基盤・ルーターを一つ選び、採用理由と不採用候補との差をそれぞれ2〜3行で書く。
-2. DBアクセス方式を一つ選び、スコア保存に必要な最小テーブルをマイグレーションとして作る。
-3. まずHTTP APIのみで進めるか、WebSocketのPoCも並行して作るかを決める。
-4. 選んだ構成で、次のAPIを実装し、`go test ./...` が通る状態にする。
+1. GinでHTTPサーバーを起動し、ルーティングを定義する。
+2. GORMでPostgreSQLに接続し、スコア保存に必要な最小テーブルをマイグレーションとして作る。
+3. MVPではHTTP APIのみで進め、WebSocketのPoCは対戦機能を作る段階で検討する。
+4. 次のAPIを実装し、`go test ./...` が通る状態にする。
 
 ```text
 GET  /health
@@ -69,14 +68,33 @@ POST /api/scores
 GET  /api/rankings
 ```
 
-比較の観点は、Goの学習コスト、APIの実装速度、レイヤードアーキテクチャとの相性、テストの書きやすさ、PostgreSQLとの接続、WebSocketへの拡張性とする。
+実装時は、Goの学習コスト、APIの実装速度、レイヤードアーキテクチャとの相性、テストの書きやすさ、PostgreSQLとの接続、WebSocketへの拡張性を確認する。
 
 ## 開発開始
 
-以下のコマンドで `go.mod` を作成してから開発を始めることができます。
+依存関係を取得する。
 
 ```bash
-go mod init github.com/KOU050223/wip/backend
+go mod tidy
+```
+
+テストを実行する。
+
+```bash
+go test ./...
+```
+
+PostgreSQLの接続先を指定してサーバーを起動する。
+
+```bash
+DATABASE_URL="postgres://user:password@localhost:5432/game?sslmode=disable" go run ./cmd/server
+```
+
+PowerShellの場合は以下のように指定する。
+
+```powershell
+$env:DATABASE_URL = "postgres://user:password@localhost:5432/game?sslmode=disable"
+go run ./cmd/server
 ```
 
 ## 目的
