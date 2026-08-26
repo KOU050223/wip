@@ -1,4 +1,5 @@
 import { Route, Routes } from 'react-router-dom'
+import { JoyConProvider } from './contexts/JoyConContext'
 import ConnectPage from './pages/ConnectPage'
 import GamePage from './pages/GamePage'
 import RankingPage from './pages/RankingPage'
@@ -7,13 +8,15 @@ import TitlePage from './pages/TitlePage'
 
 function App() {
   return (
-    <Routes>
-      <Route path="/" element={<TitlePage />} />
-      <Route path="/connect" element={<ConnectPage />} />
-      <Route path="/game" element={<GamePage />} />
-      <Route path="/result" element={<ResultPage />} />
-      <Route path="/ranking" element={<RankingPage />} />
-    </Routes>
+    <JoyConProvider>
+      <Routes>
+        <Route path="/" element={<TitlePage />} />
+        <Route path="/connect" element={<ConnectPage />} />
+        <Route path="/game" element={<GamePage />} />
+        <Route path="/result" element={<ResultPage />} />
+        <Route path="/ranking" element={<RankingPage />} />
+      </Routes>
+    </JoyConProvider>
   )
 }
 
