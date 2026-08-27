@@ -4,13 +4,23 @@ import (
 	"log"
 	"os"
 
+	_ "github.com/KOU050223/wip/backend/docs"
+
 	"github.com/KOU050223/wip/backend/internal/config"
 	"github.com/KOU050223/wip/backend/internal/database"
 	"github.com/KOU050223/wip/backend/internal/httpapi"
 	"github.com/KOU050223/wip/backend/internal/repository"
 	"github.com/KOU050223/wip/backend/internal/usecase"
 	"github.com/joho/godotenv"
+	swaggerFiles "github.com/swaggo/files"
+	ginSwagger "github.com/swaggo/gin-swagger"
 )
+
+// @title           Score API
+// @version         1.0
+// @description     Score management API.
+// @host            localhost:8080
+// @BasePath        /
 
 func main() {
 	_ = godotenv.Load()
@@ -37,6 +47,7 @@ func main() {
 		database.Ping(db),
 	)
 
+	router.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
 	port := os.Getenv("PORT")
 	if port == "" {
 		port = "8080"
