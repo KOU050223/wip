@@ -8,11 +8,15 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/KOU050223/wip/backend/internal/domain"
 	"github.com/KOU050223/wip/backend/internal/realtime"
 	"github.com/KOU050223/wip/backend/internal/usecase"
+	"github.com/alicebob/miniredis/v2"
 	"github.com/gin-gonic/gin"
+	"github.com/gorilla/websocket"
+	"github.com/redis/go-redis/v9"
 )
 
 var testAllowOrigins = []string{"http://localhost:3000"}
@@ -104,6 +108,20 @@ func TestHealthReturnsServiceUnavailableWhenDatabaseIsDown(t *testing.T) {
 	}
 	if body.Status != "error" {
 		t.Fatalf("status = %q, want %q", body.Status, "error")
+	}
+}
+
+func TestReadinessReturnsServiceUnavailableWhenRedisIsDown(t *testing.T) {
+	router := NewRouterWithRealtimeAndRoomsAndReadiness(
+		usecase.NewScoreUsecase(&memoryScoreRepository{}), testAllowOrigins,
+		func(context.Context) error { return nil }, nil, realtime.NewGuestSessions("test"), nil,
+		func(context.Context) error { return errors.New("redis unavailable") },
+	)
+
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/readyz", nil))
+	if response.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want %d", response.Code, http.StatusServiceUnavailable)
 	}
 }
 
@@ -203,7 +221,7 @@ func TestMatchmakingQueueUsesGuestPlayerCookie(t *testing.T) {
 
 	response := httptest.NewRecorder()
 	request := httptest.NewRequest(http.MethodPost, "/api/matchmaking/queue", nil)
-	request.AddCookie(&http.Cookie{Name: "player_id", Value: "player-1"})
+	request.AddCookie(guestCookie(t, router))
 	router.ServeHTTP(response, request)
 
 	if response.Code != http.StatusOK {
@@ -211,10 +229,83 @@ func TestMatchmakingQueueUsesGuestPlayerCookie(t *testing.T) {
 	}
 }
 
+func TestGuestSessionIssuesSignedCookieAndRejectsForgedPlayerID(t *testing.T) {
+	router := newMatchmakingTestRouter(&memoryQueue{})
+
+	guestResponse := httptest.NewRecorder()
+	router.ServeHTTP(guestResponse, httptest.NewRequest(http.MethodPost, "/api/guests", nil))
+	if guestResponse.Code != http.StatusCreated {
+		t.Fatalf("guest status = %d, want %d", guestResponse.Code, http.StatusCreated)
+	}
+	cookies := guestResponse.Result().Cookies()
+	if len(cookies) != 1 || cookies[0].Name != "guest_session" {
+		t.Fatalf("cookies = %#v, want signed guest cookie", cookies)
+	}
+
+	forged := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/api/matchmaking/queue", nil)
+	request.AddCookie(&http.Cookie{Name: "player_id", Value: "victim"})
+	router.ServeHTTP(forged, request)
+	if forged.Code != http.StatusUnauthorized {
+		t.Fatalf("forged cookie status = %d, want %d", forged.Code, http.StatusUnauthorized)
+	}
+
+	authenticated := httptest.NewRecorder()
+	request = httptest.NewRequest(http.MethodPost, "/api/matchmaking/queue", nil)
+	request.AddCookie(cookies[0])
+	router.ServeHTTP(authenticated, request)
+	if authenticated.Code != http.StatusOK {
+		t.Fatalf("signed cookie status = %d, want %d", authenticated.Code, http.StatusOK)
+	}
+
+	tampered := httptest.NewRecorder()
+	request = httptest.NewRequest(http.MethodPost, "/api/matchmaking/queue", nil)
+	request.AddCookie(&http.Cookie{Name: cookies[0].Name, Value: cookies[0].Value + "x"})
+	router.ServeHTTP(tampered, request)
+	if tampered.Code != http.StatusUnauthorized {
+		t.Fatalf("tampered cookie status = %d, want %d", tampered.Code, http.StatusUnauthorized)
+	}
+}
+
+func TestRoomWebSocketRejectsPlayerOutsideMatch(t *testing.T) {
+	server := miniredis.RunT(t)
+	client := redis.NewClient(&redis.Options{Addr: server.Addr()})
+	t.Cleanup(func() { _ = client.Close() })
+	queue := realtime.NewRedisQueue(client)
+	if _, err := queue.Join(t.Context(), "alice"); err != nil {
+		t.Fatalf("alice Join returned error: %v", err)
+	}
+	match, err := queue.Join(t.Context(), "bob")
+	if err != nil {
+		t.Fatalf("bob Join returned error: %v", err)
+	}
+	sessions := realtime.NewGuestSessions("test-secret")
+	router := NewRouterWithRealtimeAndRooms(
+		usecase.NewScoreUsecase(&memoryScoreRepository{}), testAllowOrigins,
+		func(context.Context) error { return nil }, realtime.NewMatchmakingService(queue), sessions, realtime.NewRedisRoom(client),
+	)
+	httpServer := httptest.NewServer(router)
+	t.Cleanup(httpServer.Close)
+
+	wsURL := "ws" + strings.TrimPrefix(httpServer.URL, "http") + "/api/matches/" + match.ID + "/ws"
+	header := http.Header{}
+	header.Add("Cookie", (&http.Cookie{Name: realtime.GuestSessionCookieName, Value: sessions.Sign("mallory", time.Now().Add(time.Hour))}).String())
+	connection, response, err := websocket.DefaultDialer.Dial(wsURL, header)
+	if connection != nil {
+		_ = connection.Close()
+	}
+	if err == nil {
+		t.Fatal("WebSocket connection for an unrelated player succeeded")
+	}
+	if response == nil || response.StatusCode != http.StatusForbidden {
+		t.Fatalf("WebSocket response = %#v, want 403", response)
+	}
+}
+
 func TestMatchmakingQueuePostReturnsOnlyStatusWhileWaiting(t *testing.T) {
 	router := newMatchmakingTestRouter(&memoryQueue{})
 
-	response := performMatchmakingRequest(router, http.MethodPost, "player-1")
+	response := performMatchmakingRequest(t, router, http.MethodPost, "player-1")
 	if response.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d", response.Code, http.StatusOK)
 	}
@@ -233,11 +324,11 @@ func TestMatchmakingQueuePostReturnsOnlyStatusWhileWaiting(t *testing.T) {
 
 func TestMatchmakingQueuePostFoundResponseDoesNotExposePlayers(t *testing.T) {
 	router := newMatchmakingTestRouter(&memoryQueue{})
-	if response := performMatchmakingRequest(router, http.MethodPost, "player-1"); response.Code != http.StatusOK {
+	if response := performMatchmakingRequest(t, router, http.MethodPost, "player-1"); response.Code != http.StatusOK {
 		t.Fatalf("first POST status = %d, want %d", response.Code, http.StatusOK)
 	}
 
-	response := performMatchmakingRequest(router, http.MethodPost, "player-2")
+	response := performMatchmakingRequest(t, router, http.MethodPost, "player-2")
 	if response.Code != http.StatusOK {
 		t.Fatalf("second POST status = %d, want %d", response.Code, http.StatusOK)
 	}
@@ -276,12 +367,12 @@ func TestMatchmakingQueueRejectsRequestsWithoutPlayerCookie(t *testing.T) {
 
 func TestMatchmakingQueueDeleteReturnsNoContentAndIsIdempotent(t *testing.T) {
 	router := newMatchmakingTestRouter(&memoryQueue{})
-	if response := performMatchmakingRequest(router, http.MethodPost, "player-1"); response.Code != http.StatusOK {
+	if response := performMatchmakingRequest(t, router, http.MethodPost, "player-1"); response.Code != http.StatusOK {
 		t.Fatalf("POST status = %d, want %d", response.Code, http.StatusOK)
 	}
 
 	for range 2 {
-		response := performMatchmakingRequest(router, http.MethodDelete, "player-1")
+		response := performMatchmakingRequest(t, router, http.MethodDelete, "player-1")
 		if response.Code != http.StatusNoContent {
 			t.Errorf("DELETE status = %d, want %d", response.Code, http.StatusNoContent)
 		}
@@ -297,10 +388,25 @@ func newMatchmakingTestRouter(queue realtime.Queue) *gin.Engine {
 	)
 }
 
-func performMatchmakingRequest(router *gin.Engine, method, playerID string) *httptest.ResponseRecorder {
+func performMatchmakingRequest(t *testing.T, router *gin.Engine, method, playerID string) *httptest.ResponseRecorder {
+	t.Helper()
 	response := httptest.NewRecorder()
 	request := httptest.NewRequest(method, "/api/matchmaking/queue", nil)
-	request.AddCookie(&http.Cookie{Name: "player_id", Value: playerID})
+	request.AddCookie(guestCookie(t, router))
 	router.ServeHTTP(response, request)
 	return response
+}
+
+func guestCookie(t *testing.T, router *gin.Engine) *http.Cookie {
+	t.Helper()
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/api/guests", nil))
+	if response.Code != http.StatusCreated {
+		t.Fatalf("guest status = %d, want %d", response.Code, http.StatusCreated)
+	}
+	cookies := response.Result().Cookies()
+	if len(cookies) != 1 {
+		t.Fatalf("guest cookies = %#v, want one", cookies)
+	}
+	return cookies[0]
 }

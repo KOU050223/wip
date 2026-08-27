@@ -29,7 +29,7 @@ func (q *RedisQueue) Join(ctx context.Context, playerID string) (Match, error) {
 	result, err := q.client.Eval(ctx, `
 local key, player, matchID, now, stale, ttl = KEYS[1], ARGV[1], ARGV[2], ARGV[3], ARGV[4], ARGV[5]
 redis.call('ZREMRANGEBYSCORE', key, 0, now - stale)
-local existing = redis.call('GET', 'matchmaking:player:' .. player)
+	local existing = redis.call('GET', 'matchmaking:player:' .. player)
 if existing then return { 'found', existing } end
 redis.call('ZADD', key, 'NX', now, player)
 local players = redis.call('ZRANGE', key, 0, 1)
@@ -37,6 +37,8 @@ if #players < 2 then return { 'waiting' } end
 redis.call('ZREM', key, players[1], players[2])
 redis.call('SET', 'matchmaking:player:' .. players[1], matchID, 'PX', ttl)
 redis.call('SET', 'matchmaking:player:' .. players[2], matchID, 'PX', ttl)
+redis.call('HSET', 'match:' .. matchID, 'player:1', players[1], 'player:2', players[2], 'state', 'found')
+redis.call('PEXPIRE', 'match:' .. matchID, ttl)
 return { 'found', matchID }
 `, []string{q.key}, playerID, matchID, time.Now().UnixMilli(), queueStaleAfter.Milliseconds(), matchResultLifetime.Milliseconds()).StringSlice()
 	if err != nil {
@@ -49,17 +51,32 @@ return { 'found', matchID }
 }
 
 func (q *RedisQueue) Cancel(ctx context.Context, playerID string) error {
-	pipe := q.client.TxPipeline()
-	pipe.ZRem(ctx, q.key, playerID)
-	pipe.Del(ctx, "matchmaking:player:"+playerID)
-	_, err := pipe.Exec(ctx)
-	return err
+	result, err := q.client.Eval(ctx, `
+local key, player = KEYS[1], ARGV[1]
+if redis.call('GET', 'matchmaking:player:' .. player) then return 0 end
+redis.call('ZREM', key, player)
+return 1
+`, []string{q.key}, playerID).Int()
+	if err != nil {
+		return err
+	}
+	if result == 0 {
+		return ErrMatchAlreadyFound
+	}
+	return nil
 }
 
 func (q *RedisQueue) Status(ctx context.Context, playerID string) (Match, error) {
 	matchID, err := q.client.Get(ctx, "matchmaking:player:"+playerID).Result()
 	if err == redis.Nil {
-		return Match{Status: MatchWaiting}, nil
+		waiting, waitingErr := q.client.ZScore(ctx, q.key, playerID).Result()
+		if waitingErr == nil && waiting >= 0 {
+			return Match{Status: MatchWaiting}, nil
+		}
+		if waitingErr != nil && waitingErr != redis.Nil {
+			return Match{}, waitingErr
+		}
+		return Match{Status: MatchIdle}, nil
 	}
 	if err != nil {
 		return Match{}, err

@@ -37,6 +37,10 @@ func main() {
 	if redisURL == "" {
 		log.Fatal("UPSTASH_REDIS_URL is required")
 	}
+	guestSessionSecret := os.Getenv("GUEST_SESSION_SECRET")
+	if guestSessionSecret == "" {
+		log.Fatal("GUEST_SESSION_SECRET is required")
+	}
 	redisOptions, err := redis.ParseURL(redisURL)
 	if err != nil {
 		log.Fatalf("failed to parse UPSTASH_REDIS_URL: %v", err)
@@ -51,11 +55,14 @@ func main() {
 
 	scoreRepository := repository.NewGormScoreRepository(db)
 	scoreUsecase := usecase.NewScoreUsecase(scoreRepository)
-	router := httpapi.NewRouterWithRealtime(
+	router := httpapi.NewRouterWithRealtimeAndRoomsAndReadiness(
 		scoreUsecase,
 		config.AllowOrigins(),
 		database.Ping(db),
 		realtime.NewMatchmakingService(realtime.NewRedisQueue(redisClient)),
+		realtime.NewGuestSessions(guestSessionSecret),
+		realtime.NewRedisRoom(redisClient),
+		func(ctx context.Context) error { return redisClient.Ping(ctx).Err() },
 	)
 
 	port := os.Getenv("PORT")

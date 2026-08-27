@@ -122,7 +122,7 @@ func TestRedisQueueDropsStaleWaitingPlayers(t *testing.T) {
 	}
 }
 
-func TestRedisQueueCancelRemovesWaitingPlayerAndMatchResult(t *testing.T) {
+func TestRedisQueueCancelRemovesWaitingPlayer(t *testing.T) {
 	queue, _, client := newTestRedisQueue(t)
 	if _, err := queue.Join(t.Context(), "alice"); err != nil {
 		t.Fatalf("alice Join returned error: %v", err)
@@ -135,8 +135,8 @@ func TestRedisQueueCancelRemovesWaitingPlayerAndMatchResult(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Status returned error: %v", err)
 	}
-	if status.Status != MatchWaiting {
-		t.Fatalf("status = %q, want %q", status.Status, MatchWaiting)
+	if status.Status != MatchIdle {
+		t.Fatalf("status = %q, want %q", status.Status, MatchIdle)
 	}
 	if err := client.ZScore(t.Context(), queue.key, "alice").Err(); err != redis.Nil {
 		t.Fatalf("waiting player remains in queue: %v", err)
@@ -165,8 +165,42 @@ func TestRedisQueueMatchResultExpires(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Status returned error: %v", err)
 	}
-	if status.Status != MatchWaiting {
-		t.Fatalf("status after expiration = %q, want %q", status.Status, MatchWaiting)
+	if status.Status != MatchIdle {
+		t.Fatalf("status after expiration = %q, want %q", status.Status, MatchIdle)
+	}
+}
+
+func TestRedisQueueStatusIsIdleBeforeJoining(t *testing.T) {
+	queue, _, _ := newTestRedisQueue(t)
+
+	match, err := queue.Status(t.Context(), "alice")
+	if err != nil {
+		t.Fatalf("Status returned error: %v", err)
+	}
+	if match.Status != MatchStatus("idle") {
+		t.Fatalf("status = %q, want %q", match.Status, "idle")
+	}
+}
+
+func TestRedisQueueCancelAfterMatchKeepsMatchResult(t *testing.T) {
+	queue, _, _ := newTestRedisQueue(t)
+	if _, err := queue.Join(t.Context(), "alice"); err != nil {
+		t.Fatalf("alice Join returned error: %v", err)
+	}
+	matched, err := queue.Join(t.Context(), "bob")
+	if err != nil {
+		t.Fatalf("bob Join returned error: %v", err)
+	}
+
+	if err := queue.Cancel(t.Context(), "alice"); err == nil {
+		t.Fatal("Cancel returned nil after a match was found")
+	}
+	status, err := queue.Status(t.Context(), "alice")
+	if err != nil {
+		t.Fatalf("Status returned error: %v", err)
+	}
+	if status.Status != MatchFound || status.ID != matched.ID {
+		t.Fatalf("status = %#v, want found match %q", status, matched.ID)
 	}
 }
 

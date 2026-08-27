@@ -1,13 +1,19 @@
 package realtime
 
-import "context"
+import (
+	"context"
+	"errors"
+)
 
 type MatchStatus string
 
 const (
+	MatchIdle    MatchStatus = "idle"
 	MatchWaiting MatchStatus = "waiting"
 	MatchFound   MatchStatus = "found"
 )
+
+var ErrMatchAlreadyFound = errors.New("cannot cancel a match that has already been found")
 
 type Match struct {
 	Status  MatchStatus
