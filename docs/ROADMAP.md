@@ -1,0 +1,195 @@
+# Issue整理 / これからやること
+
+2026-08-27 時点のリポジトリと Issue を棚卸しし、「今どこまでできているか」「次に誰が何をやるか」を整理したもの。
+
+関連ドキュメント: [IDEA.md](./IDEA.md)（企画・技術方針）
+
+---
+
+## 1. 現状サマリ
+
+### できていること
+
+| 領域 | 実装済み |
+| --- | --- |
+| FE 入力 | WebHID による Joy-Con 接続・ジャイロ/加速度の取得（`lib/joycon/joyConDevice.ts`、`hooks/useJoyCon.ts`、`contexts/JoyConContext.tsx`） |
+| FE 3D | ライトセーバー表示とジャイロ連動（`components/three/Lightsaber.tsx`、`LightsaberScene.tsx`） |
+| FE ロジック | 斬撃判定・コンボ・スコア・HP・敵スポーンのモジュール（`src/game/*.ts`）＋ 一部の単体テスト |
+| FE 画面 | ルーティングと5画面の枠（Title / Connect / Game / Result / Ranking） |
+| BE | Gin + GORM のレイヤード構成、`GET /health`・`POST /api/scores`・`GET /api/rankings`、入力バリデーション、ユースケース/ルーターのテスト |
+| Infra | PR ごとの CI（FE: lint/format/test/build、BE: gofmt/vet/test）、lefthook、Taskfile、Nix flake（Issue #4 / #5 完了済み） |
+
+### できていないこと（＝これからやること）
+
+- **`src/game/*.ts` が画面に繋がっていない。** 敵は 3D シーンに描画されておらず、斬撃判定もゲームループも動いていない。IDEA.md の最初の完成条件「Joy-Conを振る → 敵に当たる → 敵が消える」が**まだ通っていない**。ここが最大の穴。
+- Result / Ranking / Title 画面が中身のないスタブ（各12行）。
+- FE から BE を呼ぶ API クライアントが存在しない。スコアは保存も表示もされていない。
+- Tailwind CSS / Motion が未導入。演出・UI が手つかず。
+- BE に **CORS 設定がない**。このままだとブラウザから API を叩けない（FE/BE のオリジンが別のため）。
+- ローカルで Postgres を立てる手段がない（compose なし、`.env.example` なし）。`DATABASE_URL` 必須なので BE をローカルで動かすハードルが高い。
+- デプロイ先がどこにも存在しない（FE / BE / DB すべて）。
+- 対戦（WebSocket）は未着手。
+
+---
+
+## 2. 既存 Issue の棚卸し
+
+| # | タイトル | 担当 | マイルストーン | 状態・メモ |
+| --- | --- | --- | --- | --- |
+| #3 | ゲームのロジック的な概要の総括 | 全員 | — | 議論用の親 Issue。ここから子 Issue に分解する（下記「新規で立てたい Issue」がその分解にあたる） |
+| #10 | 囁き攻撃 | FE + BE | M3 | 概要が未記入。対戦（#12）が前提なので**後回し**。まず仕様を書く |
+| #12 | 対戦用のサーバー実装 | BE | M3 | Phase 3。マッチング/同期/勝敗。#10 の前提 |
+| #13 | フロントエンドデプロイ | Infra | **M2 最優先** | Cloudflare Pages / Vercel。WebHID・WebXR の実機検証に HTTPS が要るので早めに |
+| #14 | バックエンドAPIサーバーデプロイ | Infra | M2 | Cloud Run / Fly.io / Render。**マネージド Postgres の用意が前提**（下記 NEW-8） |
+| #15 | ゲームサーバーデプロイ | Infra | M3 | #12 の実装が前提。今は着手しない |
+| #16 | openapi.yamlの自動生成 | BE | M2 | #17 の前提。実装からの生成なので API が固まってから |
+| #17 | openapi.yamlからフロントエンドコード生成 | FE | M2 | #16 の完了が前提 |
+
+**依存関係:**
+
+```text
+#16 ──> #17
+#12 ──> #15
+#12 ──> #10
+NEW-8(DB用意) ──> #14
+```
+
+### 新規で立てたい Issue
+
+既存 Issue でカバーされていない作業。番号は仮。
+
+| 仮番号 | タイトル | 担当 | M |
+| --- | --- | --- | --- |
+| NEW-1 | feat: 敵の3D表示とスポーン | FE①ゲーム | M1 |
+| NEW-2 | feat: ゲームループ統合（斬撃判定・コンボ・スコアを画面に接続） | FE①ゲーム | M1 |
+| NEW-3 | feat: デバッグ用キーボード操作 | FE①ゲーム | M1 |
+| NEW-4 | feat: UI基盤導入（Tailwind CSS / Motion） | FE②UI | M1 |
+| NEW-5 | feat: Battle HUD（HP・コンボ・スコア・誘惑セリフ） | FE②UI | M1 |
+| NEW-6 | feat: 斬撃演出（SLASH・画面揺れ・フラッシュ・コンボ） | FE②UI | M1 |
+| NEW-7 | feat: BEにCORS設定を追加 | BE | M1 |
+| NEW-8 | infra: ローカル開発用Postgres（docker compose）と `.env.example` | Infra | M1 |
+| NEW-9 | feat: スコア送信とランキング表示（Result / Ranking 画面のAPI連携） | FE②UI + BE | M2 |
+| NEW-10 | infra: 本番用マネージドPostgresの用意とシークレット管理 | Infra | M2 |
+| NEW-11 | infra: mainマージ時の自動デプロイ（CD） | Infra | M2 |
+| NEW-12 | feat: VR（WebXR）対応の調査 | FE①ゲーム | M3 |
+
+---
+
+## 3. マイルストーン
+
+### M1: 縦通しMVP（ローカルで遊べる）
+
+**完了条件:** Joy-Con を振る → ライトセーバーが振られる → 敵に当たる → 敵が消える → スコアとコンボが画面に出る。ローカル完結でよい。
+
+対象: NEW-1〜8
+
+### M2: 公開＋スコア永続化
+
+**完了条件:** HTTPS の公開URLで遊べて、スコアが DB に保存され、ランキング画面に出る。
+
+対象: #13, #14, #16, #17, NEW-9〜11
+
+### M3: 対戦
+
+**完了条件:** マッチングして、相手に誘惑を送れて、勝敗が出る。
+
+対象: #10, #12, #15, NEW-12
+
+---
+
+## 4. 役割別「これからやること」
+
+### フロントエンドの人
+
+FE は 2レーンに分けると衝突しない。境界は **イベント**（ゲーム側が `enemyDefeated` などを発火し、UI 側が演出を担当）。`src/game/types.ts` の `GameEvent` がすでにその契約になっている。
+
+#### FE① ゲーム・入力レーン
+
+**今すぐやること: NEW-1 → NEW-2（最優先。ここが全体のボトルネック）**
+
+1. **NEW-1 敵の3D表示**
+   - `enemySpawn.ts` が返す `Enemy` を R3F で描画するコンポーネントを作る
+   - 敵の見た目（睡眠の誘惑 / 明日やればよくない？ など）と `hitRadius` の可視化（デバッグ用）
+2. **NEW-2 ゲームループ統合**
+   - `LightsaberScene` の `useFrame` で毎フレーム: スポーン → セーバー先端の速度算出 → `attackDetection` で当たり判定 → `hp` 減算 → `combo` / `score` 更新
+   - 発生した `GameEvent` を UI レーンに渡す仕組み（context もしくはコールバック）を用意する ← **UI 担当と先に合意すること**
+   - `GamePage` を「ゲームが成立する画面」にする
+3. **NEW-3 デバッグ用キーボード操作**
+   - Joy-Con なしで開発・CI 検証できるようにする。実機がない人の開発速度に直結するので早めに
+4. **#17 openapi からのコード生成**（#16 完了後）
+5. **NEW-12 WebXR 調査**（M3）
+
+#### FE② UI・演出レーン
+
+**今すぐやること: NEW-4（他の UI 作業の前提）**
+
+1. **NEW-4 UI基盤導入** — Tailwind CSS と Motion を入れる。デザインの方向性（色・フォント・トーン）を決める
+2. **NEW-5 Battle HUD** — HP バー、コンボ数、スコア、敵の誘惑セリフ表示
+3. **NEW-6 斬撃演出** — `SLASH!!` 表示、コンボ演出、画面揺れ、フラッシュ。FE① の `GameEvent` を購読して発火する
+4. **Title / Result 画面の中身** — 現状スタブ。プレイヤー名入力（`player_name` が必要）、リザルト表示
+5. **NEW-9 スコア送信とランキング表示**（M2）— `POST /api/scores` と `GET /api/rankings` を叩く
+
+---
+
+### バックエンドの人
+
+MVP の API（`/health`、`POST /api/scores`、`GET /api/rankings`）はバリデーション・テストまで含めて**すでに完成している**。次は「FE から実際に使える状態にする」ことと、Phase 2/3。
+
+**今すぐやること: NEW-7 CORS（FE が繋げないブロッカー）**
+
+1. **NEW-7 CORS 設定を追加**
+   - `gin` にミドルウェアを入れ、許可オリジンを環境変数化する（ローカルの `http://localhost:5173` と本番の FE URL）
+   - これがないと M2 で確実に詰まる。5分で終わる作業なので先にやる
+2. **#16 openapi.yaml の自動生成**
+   - 実装からの生成。`swaggo/swag` 等を検討し、`task` に生成コマンドを追加する
+   - #17（FE のコード生成）をブロックしているので、M2 の中では優先度が高い
+3. **`/health` の強化**（小）— デプロイ後のヘルスチェックで使うので DB 疎通も見るか判断する
+4. **#12 対戦用サーバー実装**（M3）
+   - WebSocket PoC → Room 管理 → 状態同期 → 切断/再接続 → 勝敗
+   - API サーバー（#14）とは別プロセス・別デプロイの想定（#15）。**先にメッセージ形式（プロトコル）を設計して FE と合意する**のが実装より先
+5. **#10 囁き攻撃の仕様**（M3）— #12 の上に乗る。現状 Issue の本文が空なので、まず仕様を書く
+
+---
+
+### インフラ / DevOps の人
+
+CI（#4 / #5）は完了済み。次は**開発環境の整備**と**デプロイ**。
+
+**今すぐやること: NEW-8 ローカル開発環境（他メンバー全員の開発速度に効く）**
+
+1. **NEW-8 ローカル開発用 Postgres と `.env.example`**
+   - `docker compose` で Postgres を立てられるようにする
+   - `.env.example` を置く（`DATABASE_URL`、`PORT`、CORS 許可オリジン、FE 側の API ベースURL）
+   - `task dev` のようなワンコマンド起動があると理想
+   - 現状 BE は `DATABASE_URL` 必須で落ちるため、BE 担当以外が動かせない。これを解消する
+2. **#13 フロントエンドデプロイ（M2 の最優先）**
+   - Cloudflare Pages か Vercel。**PR ごとの Preview Deploy まで**やると実機検証が一気に楽になる
+   - WebHID / WebXR は HTTPS が要るので、これが実機検証の前提
+3. **NEW-10 本番用マネージド Postgres とシークレット管理**
+   - #14 の前提。Neon / Supabase / Cloud SQL / Fly Postgres あたりを比較する
+   - GitHub Actions Secrets と実行環境の環境変数の置き場を決める
+4. **#14 バックエンドAPIサーバーデプロイ**
+   - Cloud Run / Fly.io / Render。Dockerfile がまだないので合わせて用意する
+   - FE の本番接続先URLの切り替え（ビルド時環境変数）まで含めて完了
+5. **NEW-11 CD** — main マージで FE/BE が自動デプロイされるようにする
+6. **#15 ゲームサーバーデプロイ**（M3）— #12 待ち。WebSocket 対応・セッションアフィニティのあるホスティングが要る点だけ先に調べておくとよい
+
+---
+
+## 5. 着手順の推奨（クリティカルパス）
+
+```text
+Infra: NEW-8(ローカルDB/.env)  ──┐
+BE:    NEW-7(CORS)             ──┼─> M2 の全作業が解禁
+FE②:   NEW-4(Tailwind/Motion)  ──┘
+FE①:   NEW-1(敵表示) ─> NEW-2(ゲームループ統合)  ← M1 のボトルネック。最優先
+```
+
+**今週やるなら:** FE① は NEW-1、FE② は NEW-4、BE は NEW-7 → #16、Infra は NEW-8 → #13。
+
+**先に合意しておくこと（実装前の会話が必要な項目）:**
+
+- FE①↔FE②: `GameEvent` の受け渡し方法（context / コールバック / イベントバス）
+- FE↔BE: スコア送信のタイミングと `player_name` の入力場所
+- BE↔FE: 対戦のメッセージ形式（M3 だが早めに）
+- Infra↔全員: 環境変数の名前と置き場所
