@@ -52,7 +52,7 @@ function ParticleGroup({
 
   useFrame((state) => {
     const mesh = meshRef.current;
-    if (!mesh) return
+    if (!mesh) return;
     if (startRef.current === null) startRef.current = state.clock.elapsedTime;
     const t = state.clock.elapsedTime - startRef.current;
     const fade = Math.max(0, 1 - (t * 1000) / DURATION_MS);
