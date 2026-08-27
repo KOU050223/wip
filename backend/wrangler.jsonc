@@ -8,6 +8,7 @@
   // Preview URL は workers.dev のサブドメインで配信されるため、両方を明示的に有効化する。
   "workers_dev": true,
   "preview_urls": true,
+  "routes": [{ "pattern": "api.uomi.dev", "custom_domain": true }],
 
   "containers": [
     {

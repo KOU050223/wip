@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/KOU050223/wip/backend/internal/config"
+	"github.com/KOU050223/wip/backend/internal/realtime"
 	"github.com/KOU050223/wip/backend/internal/usecase"
 	"github.com/gin-gonic/gin"
 )
@@ -21,20 +22,86 @@ type PingFunc func(context.Context) error
 type Router struct {
 	scoreUsecase *usecase.ScoreUsecase
 	pingDatabase PingFunc
+	matchmaking  *realtime.MatchmakingService
+}
+
+type matchmakingResponse struct {
+	Status  realtime.MatchStatus `json:"status"`
+	MatchID string               `json:"match_id,omitempty"`
 }
 
 func NewRouter(scoreUsecase *usecase.ScoreUsecase, allowOrigins []string, pingDatabase PingFunc) *gin.Engine {
+	return NewRouterWithRealtime(scoreUsecase, allowOrigins, pingDatabase, nil)
+}
+
+func NewRouterWithRealtime(scoreUsecase *usecase.ScoreUsecase, allowOrigins []string, pingDatabase PingFunc, matchmaking *realtime.MatchmakingService) *gin.Engine {
 	gin.SetMode(gin.ReleaseMode)
 
 	router := gin.New()
 	router.Use(gin.Logger(), gin.Recovery(), config.CORSMiddleware(allowOrigins))
 
-	r := &Router{scoreUsecase: scoreUsecase, pingDatabase: pingDatabase}
+	r := &Router{scoreUsecase: scoreUsecase, pingDatabase: pingDatabase, matchmaking: matchmaking}
 	router.GET("/health", r.health)
 	router.POST("/api/scores", r.createScore)
 	router.GET("/api/rankings", r.rankings)
+	router.POST("/api/matchmaking/queue", r.joinMatchmaking)
+	router.GET("/api/matchmaking/queue", r.matchmakingStatus)
+	router.DELETE("/api/matchmaking/queue", r.cancelMatchmaking)
 
 	return router
+}
+
+func (r *Router) matchmakingStatus(c *gin.Context) {
+	if r.matchmaking == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "matchmaking is unavailable"})
+		return
+	}
+	playerID, err := c.Cookie("player_id")
+	if err != nil || playerID == "" {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "guest session is required"})
+		return
+	}
+	match, err := r.matchmaking.Status(c.Request.Context(), playerID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to get matchmaking status"})
+		return
+	}
+	c.JSON(http.StatusOK, matchmakingResponse{Status: match.Status, MatchID: match.ID})
+}
+
+func (r *Router) joinMatchmaking(c *gin.Context) {
+	if r.matchmaking == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "matchmaking is unavailable"})
+		return
+	}
+	playerID, err := c.Cookie("player_id")
+	if err != nil || playerID == "" {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "guest session is required"})
+		return
+	}
+	match, err := r.matchmaking.Join(c.Request.Context(), playerID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to join matchmaking"})
+		return
+	}
+	c.JSON(http.StatusOK, matchmakingResponse{Status: match.Status, MatchID: match.ID})
+}
+
+func (r *Router) cancelMatchmaking(c *gin.Context) {
+	if r.matchmaking == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "matchmaking is unavailable"})
+		return
+	}
+	playerID, err := c.Cookie("player_id")
+	if err != nil || playerID == "" {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "guest session is required"})
+		return
+	}
+	if err := r.matchmaking.Cancel(c.Request.Context(), playerID); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to cancel matchmaking"})
+		return
+	}
+	c.Status(http.StatusNoContent)
 }
 
 func (r *Router) health(c *gin.Context) {

@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/KOU050223/wip/backend/internal/domain"
+	"github.com/KOU050223/wip/backend/internal/realtime"
 	"github.com/KOU050223/wip/backend/internal/usecase"
 	"github.com/gin-gonic/gin"
 )
@@ -19,6 +20,26 @@ var testAllowOrigins = []string{"http://localhost:3000"}
 type memoryScoreRepository struct {
 	scores []domain.Score
 	limit  int
+}
+
+type memoryQueue struct{ waiting string }
+
+func (q *memoryQueue) Join(_ context.Context, playerID string) (realtime.Match, error) {
+	if q.waiting == playerID {
+		return realtime.Match{Status: realtime.MatchWaiting}, nil
+	}
+	if q.waiting == "" {
+		q.waiting = playerID
+		return realtime.Match{Status: realtime.MatchWaiting}, nil
+	}
+	match := realtime.Match{Status: realtime.MatchFound, ID: "match-1", Players: [2]string{q.waiting, playerID}}
+	q.waiting = ""
+	return match, nil
+}
+
+func (q *memoryQueue) Cancel(_ context.Context, _ string) error { return nil }
+func (q *memoryQueue) Status(_ context.Context, _ string) (realtime.Match, error) {
+	return realtime.Match{Status: realtime.MatchWaiting}, nil
 }
 
 func (r *memoryScoreRepository) Create(ctx context.Context, score *domain.Score) error {
@@ -170,4 +191,116 @@ func TestCORSRejectsUnknownOrigin(t *testing.T) {
 	if got := response.Header().Get("Access-Control-Allow-Origin"); got != "" {
 		t.Fatalf("Access-Control-Allow-Origin = %q, want empty", got)
 	}
+}
+
+func TestMatchmakingQueueUsesGuestPlayerCookie(t *testing.T) {
+	router := NewRouterWithRealtime(
+		usecase.NewScoreUsecase(&memoryScoreRepository{}),
+		testAllowOrigins,
+		func(context.Context) error { return nil },
+		realtime.NewMatchmakingService(&memoryQueue{}),
+	)
+
+	response := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/api/matchmaking/queue", nil)
+	request.AddCookie(&http.Cookie{Name: "player_id", Value: "player-1"})
+	router.ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", response.Code, http.StatusOK)
+	}
+}
+
+func TestMatchmakingQueuePostReturnsOnlyStatusWhileWaiting(t *testing.T) {
+	router := newMatchmakingTestRouter(&memoryQueue{})
+
+	response := performMatchmakingRequest(router, http.MethodPost, "player-1")
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", response.Code, http.StatusOK)
+	}
+
+	var body map[string]json.RawMessage
+	if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+	if got := string(body["status"]); got != `"waiting"` {
+		t.Fatalf("status = %s, want %q", got, "waiting")
+	}
+	if _, ok := body["match_id"]; ok {
+		t.Fatalf("waiting response includes match_id: %s", response.Body.String())
+	}
+}
+
+func TestMatchmakingQueuePostFoundResponseDoesNotExposePlayers(t *testing.T) {
+	router := newMatchmakingTestRouter(&memoryQueue{})
+	if response := performMatchmakingRequest(router, http.MethodPost, "player-1"); response.Code != http.StatusOK {
+		t.Fatalf("first POST status = %d, want %d", response.Code, http.StatusOK)
+	}
+
+	response := performMatchmakingRequest(router, http.MethodPost, "player-2")
+	if response.Code != http.StatusOK {
+		t.Fatalf("second POST status = %d, want %d", response.Code, http.StatusOK)
+	}
+	var body map[string]json.RawMessage
+	if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+	if got := string(body["status"]); got != `"found"` {
+		t.Fatalf("status = %s, want %q", got, "found")
+	}
+	if got := string(body["match_id"]); got == "" || got == `""` {
+		t.Fatalf("match_id = %s, want non-empty", got)
+	}
+	for _, key := range []string{"Players", "players"} {
+		if _, ok := body[key]; ok {
+			t.Fatalf("response contains %q: %s", key, response.Body.String())
+		}
+	}
+	if strings.Contains(response.Body.String(), "player-1") {
+		t.Fatalf("response exposes opponent player ID: %s", response.Body.String())
+	}
+}
+
+func TestMatchmakingQueueRejectsRequestsWithoutPlayerCookie(t *testing.T) {
+	router := newMatchmakingTestRouter(&memoryQueue{})
+
+	for _, method := range []string{http.MethodPost, http.MethodGet, http.MethodDelete} {
+		response := httptest.NewRecorder()
+		request := httptest.NewRequest(method, "/api/matchmaking/queue", nil)
+		router.ServeHTTP(response, request)
+		if response.Code != http.StatusUnauthorized {
+			t.Errorf("%s status = %d, want %d", method, response.Code, http.StatusUnauthorized)
+		}
+	}
+}
+
+func TestMatchmakingQueueDeleteReturnsNoContentAndIsIdempotent(t *testing.T) {
+	router := newMatchmakingTestRouter(&memoryQueue{})
+	if response := performMatchmakingRequest(router, http.MethodPost, "player-1"); response.Code != http.StatusOK {
+		t.Fatalf("POST status = %d, want %d", response.Code, http.StatusOK)
+	}
+
+	for range 2 {
+		response := performMatchmakingRequest(router, http.MethodDelete, "player-1")
+		if response.Code != http.StatusNoContent {
+			t.Errorf("DELETE status = %d, want %d", response.Code, http.StatusNoContent)
+		}
+	}
+}
+
+func newMatchmakingTestRouter(queue realtime.Queue) *gin.Engine {
+	return NewRouterWithRealtime(
+		usecase.NewScoreUsecase(&memoryScoreRepository{}),
+		testAllowOrigins,
+		func(context.Context) error { return nil },
+		realtime.NewMatchmakingService(queue),
+	)
+}
+
+func performMatchmakingRequest(router *gin.Engine, method, playerID string) *httptest.ResponseRecorder {
+	response := httptest.NewRecorder()
+	request := httptest.NewRequest(method, "/api/matchmaking/queue", nil)
+	request.AddCookie(&http.Cookie{Name: "player_id", Value: playerID})
+	router.ServeHTTP(response, request)
+	return response
 }
