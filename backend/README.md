@@ -91,6 +91,10 @@ go test ./...
 | `DATABASE_URL` | 必須 | なし | PostgreSQLの接続先。未設定の場合は起動時に終了する。 |
 | `PORT` | 任意 | `8080` | HTTPサーバーの待ち受けポート。 |
 | `CORS_ALLOW_ORIGINS` | 任意 | `http://localhost:3000,http://localhost:5173` | CORSで許可するオリジン。カンマ区切りで複数指定できる。`*` を指定するとすべてのオリジンを許可する。 |
+| `UPSTASH_REDIS_URL` | 必須 | なし | Upstash Redis の TLS 接続URL。マッチング待機列とコンテナ間のリアルタイム状態に使用する。 |
+| `GUEST_SESSION_SECRET` | 必須 | なし | ゲストセッションCookieの署名鍵。十分に長いランダム値を設定する。 |
+
+`GET /livez` はプロセスが起動していることだけを返す。ロードバランサのreadinessには、PostgreSQLとRedisの疎通を確認する `GET /readyz` を使用する。
 
 `.env.example` をコピーして `.env` を作ると、値をシェルに書かずに開発できる。
 

@@ -102,11 +102,13 @@ Containers は **Workers Paid プラン（月$5〜）** が必要。Free プラ�
 
 ### Cloudflare 側のシークレット
 
-`DATABASE_URL` は機密情報なので `wrangler.jsonc` の `vars` には書かず、Worker Secret として登録する。
+`DATABASE_URL`、`UPSTASH_REDIS_URL`、`GUEST_SESSION_SECRET` は機密情報なので `wrangler.jsonc` の `vars` には書かず、Worker Secret として登録する。
 
 ```bash
 cd backend
 npx wrangler secret put DATABASE_URL
+npx wrangler secret put UPSTASH_REDIS_URL
+npx wrangler secret put GUEST_SESSION_SECRET
 # プロンプトに接続文字列を貼り付ける
 # 例: postgres://USER:PASSWORD@HOST/DB?sslmode=require
 ```
