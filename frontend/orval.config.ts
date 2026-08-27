@@ -9,8 +9,8 @@ export default defineConfig({
       client: "react-query",
       httpClient: "fetch",
       mode: "tags-split",
-      target: "src/api/generated/scores.ts",
-      schemas: "src/api/generated/model",
+      target: "src/api/generated/client.ts",
+      schemas: "src/api/generated/models",
       baseUrl: {
         runtime: 'import.meta.env.VITE_API_BASE_URL ?? ""',
       },

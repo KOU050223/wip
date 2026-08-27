@@ -10,8 +10,9 @@ React, TypeScript を使用してフロントエンドを構築します。
 npm run generate:api
 ```
 
-生成先は `src/api/generated/`。現在は `useGetRankings` と `useSaveScore` を
-`src/api/generated/scores/scores.ts` から利用できる。API の接続先は
+生成先は `src/api/generated/`。OpenAPI のタグ単位で Hooks を分割し、現在は
+`useGetRankings` と `useSaveScore` を `src/api/generated/scores/scores.ts` から利用できる。
+型定義は `src/api/generated/models/` に出力される。API の接続先は
 `VITE_API_BASE_URL` で指定し、未指定時は同一オリジンへリクエストする。
 
 ```tsx

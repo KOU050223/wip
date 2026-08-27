@@ -27,7 +27,7 @@ import type {
   HttpapiErrorResponse,
   HttpapiRankingsResponse,
   UsecaseCreateScoreInput,
-} from "../model";
+} from "../models";
 
 const withQueryKey = <T extends object, K>(query: T, queryKey: K): T & { queryKey: K } => {
   const result = { queryKey } as T & { queryKey: K };

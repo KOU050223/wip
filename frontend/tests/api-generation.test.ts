@@ -16,6 +16,9 @@ describe("OpenAPI Hooks generation", () => {
 
     const config = readFileSync(configPath, "utf8");
     expect(config).toContain("../backend/docs/swagger.yaml");
+    expect(config).toContain('mode: "tags-split"');
+    expect(config).toContain('target: "src/api/generated/client.ts"');
+    expect(config).toContain('schemas: "src/api/generated/models"');
     expect(config).toContain('client: "react-query"');
     expect(config).toContain('httpClient: "fetch"');
     expect(config).toContain("afterAllFilesWrite");
