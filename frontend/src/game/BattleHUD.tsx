@@ -18,14 +18,20 @@ type BattleHUDProps = {
   maxHp?: number;
   combo: number;
   score: number;
+  enemyName?: string;
   enemyHp: number;
   enemyMaxHp: number;
   phase: BattlePhase;
   defenseButton: DefenseButton;
+  isBoss?: boolean;
 };
 
-function HudCorner({ className }: { className: string }) {
-  return <div className={`absolute h-6 w-6 border-cyan-400/50 ${className}`} />;
+function HudCorner({ className, isBoss }: { className: string; isBoss: boolean }) {
+  return (
+    <div
+      className={`absolute h-6 w-6 ${isBoss ? "border-red-500/60" : "border-cyan-400/50"} ${className}`}
+    />
+  );
 }
 
 export default function BattleHUD({
@@ -33,20 +39,22 @@ export default function BattleHUD({
   maxHp = 100,
   combo,
   score,
+  enemyName = "ENEMY",
   enemyHp,
   enemyMaxHp,
   phase,
   defenseButton,
+  isBoss = false,
 }: BattleHUDProps) {
   const hpPercent = Math.round((hp / maxHp) * 100);
   const enemyHpPercent = Math.round((enemyHp / enemyMaxHp) * 100);
 
   return (
     <div className="relative flex h-full min-h-[400px] w-full flex-col justify-between p-6 font-display text-cyan-50 select-none">
-      <HudCorner className="top-3 left-3 border-t-2 border-l-2" />
-      <HudCorner className="top-3 right-3 border-t-2 border-r-2" />
-      <HudCorner className="bottom-3 left-3 border-b-2 border-l-2" />
-      <HudCorner className="right-3 bottom-3 border-r-2 border-b-2" />
+      <HudCorner className="top-3 left-3 border-t-2 border-l-2" isBoss={isBoss} />
+      <HudCorner className="top-3 right-3 border-t-2 border-r-2" isBoss={isBoss} />
+      <HudCorner className="bottom-3 left-3 border-b-2 border-l-2" isBoss={isBoss} />
+      <HudCorner className="right-3 bottom-3 border-r-2 border-b-2" isBoss={isBoss} />
 
       {/* 上段: 自分のHP・敵のHP */}
       <div className="flex items-start justify-between">
@@ -66,14 +74,24 @@ export default function BattleHUD({
         </div>
 
         <div className="w-64 text-right">
-          <div className="mb-1 text-xs tracking-widest text-cyan-400/70">ENEMY</div>
-          <div className="h-3 overflow-hidden rounded-full border border-cyan-400/30 bg-slate-900/60 shadow-[0_0_8px_rgba(76,201,240,0.15)]">
+          <div
+            className={`mb-1 text-xs tracking-widest ${isBoss ? "text-red-400/80" : "text-cyan-400/70"}`}
+          >
+            {enemyName}
+          </div>
+          <div
+            className={`h-3 overflow-hidden rounded-full border transition-colors duration-500 ${
+              isBoss
+                ? "border-red-500/40 bg-slate-900/60 shadow-[0_0_10px_rgba(239,68,68,0.25)]"
+                : "border-cyan-400/30 bg-slate-900/60 shadow-[0_0_8px_rgba(76,201,240,0.15)]"
+            }`}
+          >
             <div
-              className="ml-auto h-full bg-purple-400 transition-all duration-300"
+              className={`ml-auto h-full transition-all duration-300 ${isBoss ? "bg-red-500" : "bg-purple-400"}`}
               style={{ width: `${enemyHpPercent}%` }}
             />
           </div>
-          <div className="mt-1 text-xs text-cyan-400/70">
+          <div className={`mt-1 text-xs ${isBoss ? "text-red-400/80" : "text-cyan-400/70"}`}>
             {enemyHp} / {enemyMaxHp}
           </div>
         </div>
@@ -98,8 +116,18 @@ export default function BattleHUD({
         )}
         {phase === "enemyTurn" && (
           <div className="flex flex-col items-center gap-2">
-            <div className="text-xs tracking-widest text-red-300/80">PRESS TO GUARD</div>
-            <div className="flex h-20 w-20 animate-pulse items-center justify-center rounded-full border-4 border-red-400/70 bg-slate-900/80 text-3xl font-extrabold text-red-200 shadow-[0_0_20px_rgba(248,113,113,0.5)]">
+            <div
+              className={`text-xs tracking-widest ${isBoss ? "text-red-400" : "text-red-300/80"}`}
+            >
+              PRESS TO GUARD
+            </div>
+            <div
+              className={`flex animate-pulse items-center justify-center rounded-full font-extrabold ${
+                isBoss
+                  ? "h-24 w-24 border-4 border-red-500 bg-red-950/80 text-4xl text-red-100 shadow-[0_0_35px_rgba(239,68,68,0.8)]"
+                  : "h-20 w-20 border-4 border-red-400/70 bg-slate-900/80 text-3xl text-red-200 shadow-[0_0_20px_rgba(248,113,113,0.5)]"
+              }`}
+            >
               {DEFENSE_BUTTON_LABELS[defenseButton]}
             </div>
           </div>
