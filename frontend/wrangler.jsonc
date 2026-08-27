@@ -1,0 +1,24 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "wip-frontend",
+  "compatibility_date": "2026-08-27",
+  // Preview URL は workers.dev のサブドメインで配信されるため、両方を明示的に有効化する。
+  "workers_dev": true,
+  "preview_urls": true,
+  // Custom Domain。deploy時にCloudflareがDNSレコードと証明書を自動発行する。
+  "routes": [
+    {
+      "pattern": "wip-frontend.uomi.dev",
+      "custom_domain": true,
+    },
+  ],
+  "assets": {
+    "directory": "./dist",
+    // React Router のクライアントサイドルーティングを使うため、
+    // 未知のパスは 404 ではなく index.html を返す。
+    "not_found_handling": "single-page-application",
+  },
+  "observability": {
+    "enabled": true,
+  },
+}

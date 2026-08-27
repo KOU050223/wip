@@ -49,6 +49,18 @@ tasks:
     cmds:
       - docker compose down -v
 
+  deploy:frontend:
+    desc: フロントエンドをCloudflare Workersの本番へデプロイ
+    dir: frontend
+    cmds:
+      - npm run deploy
+
+  deploy:frontend:preview:
+    desc: フロントエンドのプレビュー版をアップロード（本番トラフィックは変更しない）
+    dir: frontend
+    cmds:
+      - npm run deploy:preview
+
   ci:
     desc: GitHub Actions と同じ品質チェックを実行
     deps:
