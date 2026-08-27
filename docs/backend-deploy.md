@@ -22,18 +22,48 @@ Worker は薄い中継役で、ルーティングやCORSは従来どおり Gin �
 ブラウザの `Origin` ヘッダーは Worker を素通りして Gin に届くため、
 既存の `CORS_ALLOW_ORIGINS` の仕組みがそのまま機能する。
 
-### なぜ Hyperdrive を使わないのか
+### なぜ Hyperdrive や D1 を使わないのか
 
-[Hyperdrive](https://developers.cloudflare.com/hyperdrive/) は **Worker のバインディング**であり、
-`env.HYPERDRIVE.connectionString` として Worker の JS ランタイム内でだけ有効な接続文字列を発行する。
-コンテナの中で動く Go プロセスは Worker とは別プロセス・別のネットワーク境界にいるため、
-このバインディングには到達できない。
+[Hyperdrive](https://developers.cloudflare.com/hyperdrive/) も [D1](https://developers.cloudflare.com/d1/) も
+**Worker のバインディング**として提供される。バインディングは Worker の JS ランタイム内でのみ有効で、
+SQL のワイヤプロトコルを喋るものではない。
 
-したがって Go の pgx はマネージドPostgresへ**直接TLS接続**する。
-接続プールは Go 側（`database/sql` の `SetMaxOpenConns` など）で管理する必要がある。
+コンテナからバインディングを使う手段自体は存在する
+（[Outbound Workers](https://developers.cloudflare.com/containers/platform-details/outbound-traffic/)。
+コンテナからの HTTP リクエストを Worker 側のハンドラで受け、`env` 経由でバインディングを叩く）。
+ただしその場合、**クエリを実行するのは Worker 側の JavaScript** になり、
+コンテナの Go が受け取るのは JSON である。つまり **GORM が使えなくなる**。
 
-Hyperdrive が効くのは「Worker 内で JS のドライバから直接クエリする」構成のときだけで、
-そのためには Go のバックエンドを Worker に書き直すことになる。
+そのため本構成では Go の pgx がマネージドPostgresへ**直接TLS接続**する。
+接続プールは Go 側（`database/sql` の `SetMaxOpenConns` など）で管理する。
+
+判断の詳細は [DBの選定](#dbの選定) を参照。
+
+### DBの選定
+
+「full Cloudflare 構成にするため D1（SQLite）を使えないか」を検討した結果、
+**マネージドPostgres を採用した**。
+
+前提として、**D1 は SQLite ファイルとしては開けない**。バインディングか HTTP API 経由でしか
+アクセスできないため、`gorm.io/driver/sqlite` では到達できない。
+
+| 案 | DBへの到達手段 | GORM | 判断 |
+| --- | --- | --- | --- |
+| **A（採用）** | pgx で Postgres へ直接TLS接続 | **維持** | 追加コストなし |
+| B′ | Outbound Worker → D1 バインディング | 破棄 | 下記の作り直しが発生 |
+| C | Worker から D1 バインディング（Goをやめる） | Go ごと破棄 | API全書き直し |
+
+B′ は同一マシン内のホップで済み、APIトークンをコンテナに置かなくてよい利点がある。
+しかし repository 層の書き直しに加えて、`AutoMigrate` から `wrangler d1 migrations` への移行、
+`database.Ping` と `/health` の作り直し、`ContainerProxy` の export が必要になる。
+`backend/README.md` が掲げる「Go でレイヤードアーキテクチャ」という前提とも合わない。
+
+得られるものがマネージドPostgres 1契約分の削減にとどまるため、A を選んだ。
+
+> [!NOTE]
+> B′ に将来的に移る場合、`outboundByHost` が `wrangler dev` のローカル D1 バインディングに対して
+> 機能するかを先に確認すること。動かない場合、
+> [ローカルで本番構成を再現する](#ローカルで本番構成を再現する)の手順が使えなくなる。
 
 ## デプロイの種類
 
