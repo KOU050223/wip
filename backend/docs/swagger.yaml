@@ -20,6 +20,13 @@ definitions:
       error:
         type: string
     type: object
+  httpapi.RankingsResponse:
+    properties:
+      rankings:
+        items:
+          $ref: '#/definitions/domain.Score'
+        type: array
+    type: object
   usecase.CreateScoreInput:
     properties:
       clear_time:
@@ -38,6 +45,34 @@ info:
   title: Score API
   version: "1.0"
 paths:
+  /api/rankings:
+    get:
+      description: Returns scores ordered by score (desc), then clear time (asc),
+        then created time (asc).
+      operationId: getRankings
+      parameters:
+      - description: Max number of entries to return (1-100, default 10)
+        in: query
+        name: limit
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/httpapi.RankingsResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/httpapi.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/httpapi.ErrorResponse'
+      summary: Get rankings
+      tags:
+      - scores
   /api/scores:
     post:
       consumes:
