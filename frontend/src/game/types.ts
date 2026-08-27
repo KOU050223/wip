@@ -13,6 +13,7 @@ export type Enemy = {
   state: EnemyState;
   spawnedAt: number;
   hitRadius: number; // 当たり判定用の半径(Bounding Sphere方式)
+  approachSpeed: number; // 奥(-z)から手前(+z)へ近づく速度(units/sec)
 };
 
 export type GameEvent =

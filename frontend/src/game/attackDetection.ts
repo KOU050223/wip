@@ -5,7 +5,7 @@
 import { Vector3 } from "three";
 import type { Enemy } from "./types";
 
-const SWING_POWER_THRESHOLD = 1.2; // Joy-Conの振り強度の閾値(要チューニング)
+export const SWING_POWER_THRESHOLD = 1.2; // Joy-Conの振り強度の閾値(要チューニング)
 
 /**
  * セーバー先端の位置と振り強度から、命中した敵を判定する。
