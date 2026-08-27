@@ -69,7 +69,7 @@ B′ は同一マシン内のホップで済み、APIトークンをコンテナ
 
 | 種類 | トリガー | コマンド | 公開先 |
 | --- | --- | --- | --- |
-| 本番 | `main` への push | `wrangler deploy` | `https://wip-backend.uozumi05.workers.dev`（想定。初回デプロイ後に確定する） |
+| 本番 | `main` への push | `wrangler deploy` | https://wip-backend.uozumi05.workers.dev |
 
 ### プレビューデプロイが無い理由
 
@@ -114,10 +114,11 @@ npx wrangler secret put DATABASE_URL
 登録した値は `backend/worker/index.ts` の `envVars` 経由でコンテナへ渡される。
 
 > [!IMPORTANT]
-> 本番用のマネージドPostgres自体はまだ用意していない（Issue #28）。
-> `DATABASE_URL` を登録するまでコンテナは起動に失敗し続ける（後述の
+> `DATABASE_URL` を登録しないままデプロイすると、コンテナは起動に失敗し続ける（後述の
 > [設定不備がクラッシュループになる](#設定不備がクラッシュループになる)）。
 > `/health` が 503 を返すのではなく、そもそもAPIが応答しない点に注意する。
+> 接続先には**外部から到達できるマネージドPostgres**を指定すること。
+> ローカル用の値（`localhost` や `host.docker.internal`）はコンテナから解決できない。
 
 非機密の `CORS_ALLOW_ORIGINS` は `backend/wrangler.jsonc` の `vars` に直接書いている。
 フロントエンドのオリジンを変える場合はここを編集する。
@@ -209,18 +210,18 @@ curl -i http://localhost:18099/health
 
 ## 残作業
 
-デプロイの仕組みは用意したが、**まだ一度もデプロイしていない**。
-本番を動かすには以下を順に進める。各手順が次の手順の前提になっている。
-
-1. **マネージドPostgresを用意する**（Issue #28）。接続文字列を入手する。
-2. **`DATABASE_URL` を登録する**。`cd backend && npx wrangler secret put DATABASE_URL`。
-   これを先に済ませないと、デプロイしても起動しないAPIが公開されるだけになる。
-3. **バックエンドをデプロイする**。`main` への push で自動実行される（`task deploy:backend` でも可）。
-   デプロイ後に確定した本番URLで `/health` が 200 を返すことを確認する。
-4. **`VITE_API_BASE_URL` を切り替える**。現在は `http://localhost:8080` のままなので、
-   3 で確定したURLに更新する（[フロントエンドの接続先を切り替える](#フロントエンドの接続先を切り替える)）。
-5. **フロントエンドを再デプロイする**。`VITE_API_BASE_URL` はビルド時に埋め込まれるため、
+1. **バックエンドをデプロイする**。`main` への push で自動実行される（`task deploy:backend` でも可）。
+   `/health` が 200 を返すことを確認する。
+2. **`VITE_API_BASE_URL` を切り替える**。現在は `http://localhost:8080` のままなので、
+   本番URLに更新する（[フロントエンドの接続先を切り替える](#フロントエンドの接続先を切り替える)）。
+3. **フロントエンドを再デプロイする**。`VITE_API_BASE_URL` はビルド時に埋め込まれるため、
    変数を変えるだけでは反映されない。
+
+> [!NOTE]
+> `wrangler deploy` を一度も実行していない状態で `wrangler secret put` を実行すると、
+> **中身のないプレースホルダWorkerが自動生成される**。この状態では
+> `wip-backend.uozumi05.workers.dev` は 404 を返し、`wrangler containers list` にも何も出ない。
+> 設定ミスではなく、初回デプロイで解消する。登録済みのシークレットはデプロイをまたいで保持される。
 
 ## 既知の課題
 
