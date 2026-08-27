@@ -86,3 +86,10 @@ Workers & Pages > `wip-frontend` > Settings > Domains & Routes で確認でき�
 - fork からの Pull Request では Secrets が渡されないため、プレビューのデプロイは失敗する。
 - wrangler のバージョンは `frontend/package.json` の devDependencies とワークフローの
   `wranglerVersion` の両方で固定している。更新する際は両方を揃えること。
+- `cloudflare/wrangler-action` は可変タグではなくコミットSHAで固定している。
+  Cloudflare API トークンを扱うジョブのため、タグの付け替えによる意図しない変更を防ぐのが目的。
+  更新する際は次のコマンドでSHAを取得し、末尾のコメントのバージョンも合わせて書き換える。
+
+  ```bash
+  gh api repos/cloudflare/wrangler-action/git/ref/tags/v3.15.0 --jq '.object.sha'
+  ```
