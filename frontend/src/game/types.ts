@@ -16,6 +16,7 @@ export type Enemy = {
   state: EnemyState;
   spawnedAt: number;
   requiredDirection: SwingDirection; // この方向に振らないとダメージが入らない
+  modelPath: string; // 表示に使う3Dモデル(.glb)へのパス
 };
 
 // ターン制バトルの現在の手番
