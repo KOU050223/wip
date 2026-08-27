@@ -2,6 +2,24 @@
 
 React, TypeScript を使用してフロントエンドを構築します。
 
+## OpenAPI からの API Hooks 生成
+
+バックエンドが生成する `../backend/docs/swagger.yaml` を入力に、型付きの TanStack Query Hooks を生成する。
+
+```bash
+npm run generate:api
+```
+
+生成先は `src/api/generated/`。現在は `useGetRankings` と `useSaveScore` を
+`src/api/generated/scores/scores.ts` から利用できる。API の接続先は
+`VITE_API_BASE_URL` で指定し、未指定時は同一オリジンへリクエストする。
+
+```tsx
+import { useGetRankings } from "../api/generated/scores/scores";
+
+const rankings = useGetRankings({ limit: 10 });
+```
+
 ## 基盤の候補
 
 まず、次の3種類は役割が異なる。
