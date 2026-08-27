@@ -14,6 +14,15 @@ export default defineConfig({
       baseUrl: {
         runtime: 'import.meta.env.VITE_API_BASE_URL ?? ""',
       },
+      override: {
+        fetch: {
+          includeHttpResponseReturnType: false,
+        },
+        mutator: {
+          path: "./src/api/apiClient.ts",
+          name: "apiClient",
+        },
+      },
     },
     hooks: {
       afterAllFilesWrite: "oxfmt",

@@ -29,6 +29,9 @@ import type {
   UsecaseCreateScoreInput,
 } from "../models";
 
+import { apiClient } from "../../apiClient";
+import type { ErrorType } from "../../apiClient";
+
 const withQueryKey = <T extends object, K>(query: T, queryKey: K): T & { queryKey: K } => {
   const result = { queryKey } as T & { queryKey: K };
   for (const key of Object.keys(query)) {
@@ -43,30 +46,6 @@ const withQueryKey = <T extends object, K>(query: T, queryKey: K): T & { queryKe
   }
   return result;
 };
-
-export type getRankingsResponse200 = {
-  data: HttpapiRankingsResponse;
-  status: 200;
-};
-
-export type getRankingsResponse400 = {
-  data: HttpapiErrorResponse;
-  status: 400;
-};
-
-export type getRankingsResponse500 = {
-  data: HttpapiErrorResponse;
-  status: 500;
-};
-
-export type getRankingsResponseSuccess = getRankingsResponse200 & {
-  headers: Headers;
-};
-export type getRankingsResponseError = (getRankingsResponse400 | getRankingsResponse500) & {
-  headers: Headers;
-};
-
-export type getRankingsResponse = getRankingsResponseSuccess | getRankingsResponseError;
 
 export const getGetRankingsUrl = (params?: GetRankingsParams) => {
   const normalizedParams = new URLSearchParams();
@@ -91,16 +70,11 @@ export const getGetRankingsUrl = (params?: GetRankingsParams) => {
 export const getRankings = async (
   params?: GetRankingsParams,
   options?: RequestInit,
-): Promise<getRankingsResponse> => {
-  const res = await fetch(getGetRankingsUrl(params), {
+): Promise<HttpapiRankingsResponse> => {
+  return apiClient<HttpapiRankingsResponse>(getGetRankingsUrl(params), {
     ...options,
     method: "GET",
   });
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: getRankingsResponse["data"] = body ? JSON.parse(body) : {};
-  return { data, status: res.status, headers: res.headers } as getRankingsResponse;
 };
 
 export const getGetRankingsQueryKey = (params?: GetRankingsParams) => {
@@ -112,20 +86,19 @@ export const getGetRankingsQueryKey = (params?: GetRankingsParams) => {
 
 export const getGetRankingsQueryOptions = <
   TData = Awaited<ReturnType<typeof getRankings>>,
-  TError = HttpapiErrorResponse,
+  TError = ErrorType<HttpapiErrorResponse>,
 >(
   params?: GetRankingsParams,
   options?: {
     query?: Partial<UseQueryOptions<Awaited<ReturnType<typeof getRankings>>, TError, TData>>;
-    fetch?: RequestInit;
   },
 ) => {
-  const { query: queryOptions, fetch: fetchOptions } = options ?? {};
+  const { query: queryOptions } = options ?? {};
 
   const queryKey = queryOptions?.queryKey ?? getGetRankingsQueryKey(params);
 
   const queryFn: QueryFunction<Awaited<ReturnType<typeof getRankings>>> = ({ signal }) =>
-    getRankings(params, { signal, ...fetchOptions });
+    getRankings(params, { signal });
 
   return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
     Awaited<ReturnType<typeof getRankings>>,
@@ -135,11 +108,11 @@ export const getGetRankingsQueryOptions = <
 };
 
 export type GetRankingsQueryResult = NonNullable<Awaited<ReturnType<typeof getRankings>>>;
-export type GetRankingsQueryError = HttpapiErrorResponse;
+export type GetRankingsQueryError = ErrorType<HttpapiErrorResponse>;
 
 export function useGetRankings<
   TData = Awaited<ReturnType<typeof getRankings>>,
-  TError = HttpapiErrorResponse,
+  TError = ErrorType<HttpapiErrorResponse>,
 >(
   params: undefined | GetRankingsParams,
   options: {
@@ -152,13 +125,12 @@ export function useGetRankings<
         >,
         "initialData"
       >;
-    fetch?: RequestInit;
   },
   queryClient?: QueryClient,
 ): DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
 export function useGetRankings<
   TData = Awaited<ReturnType<typeof getRankings>>,
-  TError = HttpapiErrorResponse,
+  TError = ErrorType<HttpapiErrorResponse>,
 >(
   params?: GetRankingsParams,
   options?: {
@@ -171,18 +143,16 @@ export function useGetRankings<
         >,
         "initialData"
       >;
-    fetch?: RequestInit;
   },
   queryClient?: QueryClient,
 ): UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
 export function useGetRankings<
   TData = Awaited<ReturnType<typeof getRankings>>,
-  TError = HttpapiErrorResponse,
+  TError = ErrorType<HttpapiErrorResponse>,
 >(
   params?: GetRankingsParams,
   options?: {
     query?: Partial<UseQueryOptions<Awaited<ReturnType<typeof getRankings>>, TError, TData>>;
-    fetch?: RequestInit;
   },
   queryClient?: QueryClient,
 ): UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
@@ -192,12 +162,11 @@ export function useGetRankings<
 
 export function useGetRankings<
   TData = Awaited<ReturnType<typeof getRankings>>,
-  TError = HttpapiErrorResponse,
+  TError = ErrorType<HttpapiErrorResponse>,
 >(
   params?: GetRankingsParams,
   options?: {
     query?: Partial<UseQueryOptions<Awaited<ReturnType<typeof getRankings>>, TError, TData>>;
-    fetch?: RequestInit;
   },
   queryClient?: QueryClient,
 ): UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
@@ -210,25 +179,6 @@ export function useGetRankings<
   return withQueryKey(query, queryOptions.queryKey);
 }
 
-export type saveScoreResponse201 = {
-  data: DomainScore;
-  status: 201;
-};
-
-export type saveScoreResponse400 = {
-  data: HttpapiErrorResponse;
-  status: 400;
-};
-
-export type saveScoreResponseSuccess = saveScoreResponse201 & {
-  headers: Headers;
-};
-export type saveScoreResponseError = saveScoreResponse400 & {
-  headers: Headers;
-};
-
-export type saveScoreResponse = saveScoreResponseSuccess | saveScoreResponseError;
-
 export const getSaveScoreUrl = () => {
   return `${import.meta.env.VITE_API_BASE_URL ?? ""}/api/scores`;
 };
@@ -240,7 +190,7 @@ export const getSaveScoreUrl = () => {
 export const saveScore = async (
   usecaseCreateScoreInput: UsecaseCreateScoreInput,
   options?: RequestInit,
-): Promise<saveScoreResponse> => {
+): Promise<DomainScore> => {
   const getHeaders = (
     h?: NonNullable<RequestInit["headers"]>,
   ): Record<string, string | readonly string[]> => {
@@ -249,21 +199,16 @@ export const saveScore = async (
     if (Array.isArray(h)) return Object.fromEntries(h);
     return h;
   };
-  const res = await fetch(getSaveScoreUrl(), {
+  return apiClient<DomainScore>(getSaveScoreUrl(), {
     ...options,
     method: "POST",
     headers: { "Content-Type": "application/json", ...getHeaders(options?.headers) },
     body: JSON.stringify(usecaseCreateScoreInput),
   });
-
-  const body = [204, 205, 304].includes(res.status) ? null : await res.text();
-
-  const data: saveScoreResponse["data"] = body ? JSON.parse(body) : {};
-  return { data, status: res.status, headers: res.headers } as saveScoreResponse;
 };
 
 export const getSaveScoreMutationOptions = <
-  TError = HttpapiErrorResponse,
+  TError = ErrorType<HttpapiErrorResponse>,
   TContext = unknown,
 >(options?: {
   mutation?: UseMutationOptions<
@@ -272,7 +217,6 @@ export const getSaveScoreMutationOptions = <
     SaveScoreMutationVariables,
     TContext
   >;
-  fetch?: RequestInit;
 }): UseMutationOptions<
   Awaited<ReturnType<typeof saveScore>>,
   TError,
@@ -280,11 +224,11 @@ export const getSaveScoreMutationOptions = <
   TContext
 > => {
   const mutationKey = ["saveScore"];
-  const { mutation: mutationOptions, fetch: fetchOptions } = options
+  const { mutation: mutationOptions } = options
     ? options.mutation && "mutationKey" in options.mutation && options.mutation.mutationKey
       ? options
       : { ...options, mutation: { ...options.mutation, mutationKey } }
-    : { mutation: { mutationKey }, fetch: undefined };
+    : { mutation: { mutationKey } };
 
   const mutationFn: MutationFunction<
     Awaited<ReturnType<typeof saveScore>>,
@@ -292,7 +236,7 @@ export const getSaveScoreMutationOptions = <
   > = (props) => {
     const { data } = props ?? {};
 
-    return saveScore(data, fetchOptions);
+    return saveScore(data);
   };
 
   return { mutationFn, ...mutationOptions };
@@ -300,13 +244,13 @@ export const getSaveScoreMutationOptions = <
 
 export type SaveScoreMutationResult = NonNullable<Awaited<ReturnType<typeof saveScore>>>;
 export type SaveScoreMutationBody = UsecaseCreateScoreInput;
-export type SaveScoreMutationError = HttpapiErrorResponse;
+export type SaveScoreMutationError = ErrorType<HttpapiErrorResponse>;
 export type SaveScoreMutationVariables = { data: UsecaseCreateScoreInput };
 
 /**
  * @summary Save score
  */
-export const useSaveScore = <TError = HttpapiErrorResponse, TContext = unknown>(
+export const useSaveScore = <TError = ErrorType<HttpapiErrorResponse>, TContext = unknown>(
   options?: {
     mutation?: UseMutationOptions<
       Awaited<ReturnType<typeof saveScore>>,
@@ -314,7 +258,6 @@ export const useSaveScore = <TError = HttpapiErrorResponse, TContext = unknown>(
       SaveScoreMutationVariables,
       TContext
     >;
-    fetch?: RequestInit;
   },
   queryClient?: QueryClient,
 ): UseMutationResult<

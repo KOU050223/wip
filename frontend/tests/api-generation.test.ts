@@ -21,6 +21,8 @@ describe("OpenAPI Hooks generation", () => {
     expect(config).toContain('schemas: "src/api/generated/models"');
     expect(config).toContain('client: "react-query"');
     expect(config).toContain('httpClient: "fetch"');
+    expect(config).toContain('path: "./src/api/apiClient.ts"');
+    expect(config).toContain("includeHttpResponseReturnType: false");
     expect(config).toContain("afterAllFilesWrite");
   });
 });
