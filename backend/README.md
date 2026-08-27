@@ -121,6 +121,18 @@ $env:DATABASE_URL = "postgres://wip:wip_password@localhost:5432/wip?sslmode=disa
 go run ./cmd/server
 ```
 
+## デプロイ
+
+Cloudflare Containers へデプロイする。手順・構成・既知の課題は
+[docs/backend-deploy.md](../docs/backend-deploy.md) を参照。
+
+```bash
+task deploy:backend          # 本番へデプロイ
+task deploy:backend:preview  # プレビュー版をアップロード
+```
+
+`main` への push で自動デプロイされるため、通常は手動実行は不要。
+
 ## 目的
 
 - ゲームのスコアを保存する

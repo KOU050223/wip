@@ -1,0 +1,48 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "wip-backend",
+  "main": "worker/index.ts",
+  "compatibility_date": "2026-08-27",
+  "compatibility_flags": ["nodejs_compat"],
+
+  // Preview URL は workers.dev のサブドメインで配信されるため、両方を明示的に有効化する。
+  "workers_dev": true,
+  "preview_urls": true,
+
+  "containers": [
+    {
+      "class_name": "BackendContainer",
+      "image": "./Dockerfile",
+      // lite（256MiB）は Gin + GORM + pgx にはやや窮屈なため basic を使う。
+      "instance_type": "basic",
+      // worker/index.ts の INSTANCE_COUNT 以上にすること。
+      "max_instances": 2,
+    },
+  ],
+
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "BACKEND",
+        "class_name": "BackendContainer",
+      },
+    ],
+  },
+
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["BackendContainer"],
+    },
+  ],
+
+  // コンテナへ中継する非機密の設定値。
+  // DATABASE_URL は機密なので vars ではなく `wrangler secret put` で登録する。
+  "vars": {
+    "CORS_ALLOW_ORIGINS": "https://wip-frontend.uomi.dev,https://wip-frontend.uozumi05.workers.dev",
+  },
+
+  "observability": {
+    "enabled": true,
+  },
+}

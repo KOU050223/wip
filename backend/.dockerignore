@@ -1,0 +1,18 @@
+# Go のビルドキャッシュ（backend/.gitignore と揃える）
+.gocache/
+.gopath/
+
+# ローカル専用の設定。シークレットをイメージに焼かないため必ず除外する。
+.env
+
+# Worker シム側の成果物。コンテナのビルドには不要。
+node_modules/
+.wrangler/
+worker/
+package.json
+package-lock.json
+tsconfig.json
+wrangler.jsonc
+
+# ドキュメント
+README.md

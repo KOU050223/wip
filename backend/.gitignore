@@ -1,3 +1,9 @@
 .gocache/
 .gopath/
 .env
+
+# Worker シム（Cloudflare Containers）関連
+node_modules/
+.wrangler/
+# wrangler types が生成するため、コミットしない
+worker-configuration.d.ts

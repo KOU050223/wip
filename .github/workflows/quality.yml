@@ -41,3 +41,21 @@ jobs:
       - run: test -z "$(gofmt -l .)"
       - run: go vet ./...
       - run: go test ./...
+
+  backend-worker:
+    name: Backend worker quality
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - run: npm ci
+      # worker-configuration.d.ts はコミットしないため、型検査の前に生成する。
+      - run: npx wrangler types
+      - run: npm run typecheck
