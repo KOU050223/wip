@@ -1,10 +1,10 @@
-import { Route, Routes } from 'react-router-dom'
-import { JoyConProvider } from './contexts/JoyConContext'
-import ConnectPage from './pages/ConnectPage'
-import GamePage from './pages/GamePage'
-import RankingPage from './pages/RankingPage'
-import ResultPage from './pages/ResultPage'
-import TitlePage from './pages/TitlePage'
+import { Route, Routes } from "react-router-dom";
+import { JoyConProvider } from "./contexts/JoyConContext";
+import ConnectPage from "./pages/ConnectPage";
+import GamePage from "./pages/GamePage";
+import RankingPage from "./pages/RankingPage";
+import ResultPage from "./pages/ResultPage";
+import TitlePage from "./pages/TitlePage";
 
 function App() {
   return (
@@ -17,7 +17,7 @@ function App() {
         <Route path="/ranking" element={<RankingPage />} />
       </Routes>
     </JoyConProvider>
-  )
+  );
 }
 
-export default App
+export default App;

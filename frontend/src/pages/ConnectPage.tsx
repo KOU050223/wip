@@ -1,14 +1,16 @@
-import { Link } from 'react-router-dom'
-import { useJoyConContext } from '../contexts/JoyConContext'
+import { Link } from "react-router-dom";
+import { useJoyConContext } from "../contexts/JoyConContext";
 
 function ConnectPage() {
-  const { isSupported, isConnected, state, error, connect } = useJoyConContext()
+  const { isSupported, isConnected, state, error, connect } = useJoyConContext();
 
   return (
     <section>
       <h1>Joy-Con接続</h1>
 
-      {!isSupported && <p>このブラウザはWebHIDに対応していません。Chrome / Edgeで開いてください。</p>}
+      {!isSupported && (
+        <p>このブラウザはWebHIDに対応していません。Chrome / Edgeで開いてください。</p>
+      )}
 
       {isSupported && !isConnected && (
         <button type="button" onClick={connect}>
@@ -25,12 +27,12 @@ function ConnectPage() {
             <dl>
               <dt>加速度 (G)</dt>
               <dd>
-                x: {state.accel.x.toFixed(2)} / y: {state.accel.y.toFixed(2)} / z:{' '}
+                x: {state.accel.x.toFixed(2)} / y: {state.accel.y.toFixed(2)} / z:{" "}
                 {state.accel.z.toFixed(2)}
               </dd>
               <dt>ジャイロ (deg/s)</dt>
               <dd>
-                x: {state.gyro.x.toFixed(1)} / y: {state.gyro.y.toFixed(1)} / z:{' '}
+                x: {state.gyro.x.toFixed(1)} / y: {state.gyro.y.toFixed(1)} / z:{" "}
                 {state.gyro.z.toFixed(1)}
               </dd>
             </dl>
@@ -39,7 +41,7 @@ function ConnectPage() {
         </div>
       )}
     </section>
-  )
+  );
 }
 
-export default ConnectPage
+export default ConnectPage;

@@ -8,9 +8,9 @@ import type { Enemy, EnemyState } from "./types";
  * 呼び出し側(戦闘ロジック本体)はこの結果を見てイベントを発火する。
  */
 export function applyDamage(enemy: Enemy, damage: number): Enemy {
-const nextHp = Math.max(0, enemy.hp - damage);
-const nextState: EnemyState = nextHp <= 0 ? "dying" : "hit";
-return { ...enemy, hp: nextHp, state: nextState };
+  const nextHp = Math.max(0, enemy.hp - damage);
+  const nextState: EnemyState = nextHp <= 0 ? "dying" : "hit";
+  return { ...enemy, hp: nextHp, state: nextState };
 }
 
 /**
@@ -18,23 +18,23 @@ return { ...enemy, hp: nextHp, state: nextState };
  * (配列からの削除は呼び出し側に委ねる)
  */
 export function finalizeDeath(enemy: Enemy): Enemy {
-return { ...enemy, state: "dead" };
+  return { ...enemy, state: "dead" };
 }
 
 /**
  * 被弾後、一定時間経過したら idle に戻す(HPが複数ある敵向け)。
  */
 export function recoverFromHit(enemy: Enemy): Enemy {
-if (enemy.state === "hit") {
+  if (enemy.state === "hit") {
     return { ...enemy, state: "idle" };
-}
-return enemy;
+  }
+  return enemy;
 }
 
 export function isDead(enemy: Enemy): boolean {
-return enemy.state === "dead";
+  return enemy.state === "dead";
 }
 
 export function isAlive(enemy: Enemy): boolean {
-return enemy.state !== "dead" && enemy.state !== "dying";
+  return enemy.state !== "dead" && enemy.state !== "dying";
 }
