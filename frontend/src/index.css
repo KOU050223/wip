@@ -76,3 +76,59 @@ body {
 .title-flicker {
   animation: title-flicker 1.2s ease-out both;
 }
+
+/* ボスの攻撃を受けた時・出現時の画面シェイク */
+@keyframes screen-shake {
+  0%,
+  100% {
+    transform: translate(0, 0);
+  }
+  10% {
+    transform: translate(-6px, 3px);
+  }
+  20% {
+    transform: translate(5px, -4px);
+  }
+  30% {
+    transform: translate(-4px, 5px);
+  }
+  40% {
+    transform: translate(6px, 2px);
+  }
+  50% {
+    transform: translate(-5px, -3px);
+  }
+  60% {
+    transform: translate(4px, 4px);
+  }
+  70% {
+    transform: translate(-3px, -5px);
+  }
+  80% {
+    transform: translate(5px, 3px);
+  }
+  90% {
+    transform: translate(-4px, -2px);
+  }
+}
+
+.screen-shake {
+  animation: screen-shake 0.4s ease-in-out;
+}
+
+/* ボス出現時の赤いフラッシュ */
+@keyframes boss-flash {
+  0% {
+    background-color: rgba(220, 38, 38, 0);
+  }
+  15% {
+    background-color: rgba(220, 38, 38, 0.55);
+  }
+  100% {
+    background-color: rgba(220, 38, 38, 0);
+  }
+}
+
+.boss-flash {
+  animation: boss-flash 1.8s ease-out both;
+}
