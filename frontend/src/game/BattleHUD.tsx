@@ -24,7 +24,7 @@ export default function BattleHUD({
   const seconds = state.timeRemaining % 60;
 
   return (
-    <div className="w-full h-full min-h-[400px] bg-neutral-950 text-white p-6 flex flex-col justify-between font-sans select-none">
+    <div className="w-full h-full min-h-[400px] text-white p-6 flex flex-col justify-between font-sans select-none">
       {/* 上段: HP・残り時間 */}
       <div className="flex items-start justify-between">
         <div className="w-64">

@@ -12,7 +12,7 @@ let enemyIdCounter = 0;
  */
 export function spawnEnemy(
   position: Vector3,
-  options?: { maxHp?: number; hitRadius?: number },
+  options?: { maxHp?: number; hitRadius?: number; approachSpeed?: number },
 ): Enemy {
   const maxHp = options?.maxHp ?? 1; // 最初はHP=1で「1発で倒せる」構成
 
@@ -24,6 +24,7 @@ export function spawnEnemy(
     state: "idle",
     spawnedAt: performance.now(),
     hitRadius: options?.hitRadius ?? 0.5,
+    approachSpeed: options?.approachSpeed ?? 1.5,
   };
 }
 

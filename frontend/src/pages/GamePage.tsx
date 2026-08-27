@@ -1,9 +1,9 @@
 import { Link } from "react-router-dom";
-import LightsaberScene from "../components/three/LightsaberScene";
+import GameScene from "../game/GameScene";
 import { useJoyConContext } from "../contexts/JoyConContext";
 
 function GamePage() {
-  const { isConnected, state } = useJoyConContext();
+  const { isConnected } = useJoyConContext();
 
   return (
     <section>
@@ -11,7 +11,7 @@ function GamePage() {
 
       {!isConnected && <p>Joy-Conが未接続です。先に接続画面で接続してください。</p>}
 
-      <LightsaberScene gyro={state?.gyro ?? null} />
+      <GameScene />
 
       <Link to="/result">リザルトへ</Link>
     </section>
