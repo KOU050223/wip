@@ -20,7 +20,7 @@ func AllowOrigins() []string {
 
 	var origins []string
 	for origin := range strings.SplitSeq(raw, ",") {
-		if trimmed := strings.TrimSpace(origin); trimmed != "" {
+		if trimmed := strings.TrimSpace(origin); trimmed != "" && trimmed != "*" {
 			origins = append(origins, trimmed)
 		}
 	}
@@ -37,8 +37,9 @@ func AllowOrigins() []string {
 func CORSMiddleware(allowOrigins []string) gin.HandlerFunc {
 	config := cors.DefaultConfig()
 	config.AllowOrigins = allowOrigins
-	config.AllowMethods = []string{"GET", "POST", "OPTIONS"}
-	config.AllowHeaders = []string{"Origin", "Content-Type", "Accept"}
+	config.AllowMethods = []string{"GET", "POST", "DELETE", "OPTIONS"}
+	config.AllowHeaders = []string{"Origin", "Content-Type", "Accept", "Authorization"}
+	config.AllowCredentials = true
 	config.MaxAge = 12 * time.Hour
 	return cors.New(config)
 }
