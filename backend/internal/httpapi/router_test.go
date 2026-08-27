@@ -12,6 +12,8 @@ import (
 	"github.com/KOU050223/wip/backend/internal/usecase"
 )
 
+var testAllowOrigins = []string{"http://localhost:3000"}
+
 type memoryScoreRepository struct {
 	scores []domain.Score
 	limit  int
@@ -29,7 +31,7 @@ func (r *memoryScoreRepository) FindRankings(ctx context.Context, limit int) ([]
 }
 
 func TestHealth(t *testing.T) {
-	router := NewRouter(usecase.NewScoreUsecase(&memoryScoreRepository{}))
+	router := NewRouter(usecase.NewScoreUsecase(&memoryScoreRepository{}), testAllowOrigins)
 
 	response := httptest.NewRecorder()
 	request := httptest.NewRequest(http.MethodGet, "/health", nil)
@@ -42,7 +44,7 @@ func TestHealth(t *testing.T) {
 
 func TestCreateScore(t *testing.T) {
 	repository := &memoryScoreRepository{}
-	router := NewRouter(usecase.NewScoreUsecase(repository))
+	router := NewRouter(usecase.NewScoreUsecase(repository), testAllowOrigins)
 
 	response := httptest.NewRecorder()
 	body := strings.NewReader(`{"player_name":"player","score":100,"max_combo":12,"clear_time":90}`)
@@ -62,7 +64,7 @@ func TestRankings(t *testing.T) {
 	repository := &memoryScoreRepository{
 		scores: []domain.Score{{ID: 1, PlayerName: "player", Score: 100}},
 	}
-	router := NewRouter(usecase.NewScoreUsecase(repository))
+	router := NewRouter(usecase.NewScoreUsecase(repository), testAllowOrigins)
 
 	response := httptest.NewRecorder()
 	request := httptest.NewRequest(http.MethodGet, "/api/rankings?limit=5", nil)
@@ -83,5 +85,45 @@ func TestRankings(t *testing.T) {
 	}
 	if len(body.Rankings) != 1 {
 		t.Fatalf("rankings = %d, want %d", len(body.Rankings), 1)
+	}
+}
+
+func TestCORSAllowsConfiguredOrigin(t *testing.T) {
+	router := NewRouter(usecase.NewScoreUsecase(&memoryScoreRepository{}), testAllowOrigins)
+
+	response := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodGet, "/api/rankings", nil)
+	request.Header.Set("Origin", "http://localhost:3000")
+	router.ServeHTTP(response, request)
+
+	if got := response.Header().Get("Access-Control-Allow-Origin"); got != "http://localhost:3000" {
+		t.Fatalf("Access-Control-Allow-Origin = %q, want %q", got, "http://localhost:3000")
+	}
+}
+
+func TestCORSPreflight(t *testing.T) {
+	router := NewRouter(usecase.NewScoreUsecase(&memoryScoreRepository{}), testAllowOrigins)
+
+	response := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodOptions, "/api/scores", nil)
+	request.Header.Set("Origin", "http://localhost:3000")
+	request.Header.Set("Access-Control-Request-Method", http.MethodPost)
+	router.ServeHTTP(response, request)
+
+	if response.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want %d", response.Code, http.StatusNoContent)
+	}
+}
+
+func TestCORSRejectsUnknownOrigin(t *testing.T) {
+	router := NewRouter(usecase.NewScoreUsecase(&memoryScoreRepository{}), testAllowOrigins)
+
+	response := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodGet, "/api/rankings", nil)
+	request.Header.Set("Origin", "http://evil.example.com")
+	router.ServeHTTP(response, request)
+
+	if got := response.Header().Get("Access-Control-Allow-Origin"); got != "" {
+		t.Fatalf("Access-Control-Allow-Origin = %q, want empty", got)
 	}
 }

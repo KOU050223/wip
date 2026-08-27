@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"strconv"
 
+	"github.com/KOU050223/wip/backend/internal/config"
 	"github.com/KOU050223/wip/backend/internal/usecase"
 	"github.com/gin-gonic/gin"
 )
@@ -12,11 +13,11 @@ type Router struct {
 	scoreUsecase *usecase.ScoreUsecase
 }
 
-func NewRouter(scoreUsecase *usecase.ScoreUsecase) *gin.Engine {
+func NewRouter(scoreUsecase *usecase.ScoreUsecase, allowOrigins []string) *gin.Engine {
 	gin.SetMode(gin.ReleaseMode)
 
 	router := gin.New()
-	router.Use(gin.Logger(), gin.Recovery())
+	router.Use(gin.Logger(), gin.Recovery(), config.CORSMiddleware(allowOrigins))
 
 	r := &Router{scoreUsecase: scoreUsecase}
 	router.GET("/health", r.health)
