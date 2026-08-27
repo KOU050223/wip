@@ -1,9 +1,68 @@
 basePath: /
+definitions:
+  domain.Score:
+    properties:
+      clear_time:
+        type: integer
+      created_at:
+        type: string
+      id:
+        type: integer
+      max_combo:
+        type: integer
+      player_name:
+        type: string
+      score:
+        type: integer
+    type: object
+  httpapi.ErrorResponse:
+    properties:
+      error:
+        type: string
+    type: object
+  usecase.CreateScoreInput:
+    properties:
+      clear_time:
+        type: integer
+      max_combo:
+        type: integer
+      player_name:
+        type: string
+      score:
+        type: integer
+    type: object
 host: localhost:8080
 info:
   contact: {}
   description: Score management API.
   title: Score API
   version: "1.0"
-paths: {}
+paths:
+  /api/scores:
+    post:
+      consumes:
+      - application/json
+      description: Saves a player's score, max combo, and clear time.
+      operationId: saveScore
+      parameters:
+      - description: Score payload
+        in: body
+        name: score
+        required: true
+        schema:
+          $ref: '#/definitions/usecase.CreateScoreInput'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/domain.Score'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/httpapi.ErrorResponse'
+      summary: Save score
+      tags:
+      - scores
 swagger: "2.0"
