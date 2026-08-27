@@ -21,6 +21,9 @@ export type Enemy = {
 // ターン制バトルの現在の手番
 export type BattlePhase = "playerTurn" | "enemyTurn";
 
+// 防御に使えるボタン(Joy-Con Rに存在するボタンのみ)
+export type DefenseButton = "a" | "b" | "x" | "y" | "r" | "zr";
+
 export type GameEvent =
   | { type: "enemySpawned"; enemy: Enemy }
   | { type: "enemyHit"; enemyId: string; damage: number; combo: number }

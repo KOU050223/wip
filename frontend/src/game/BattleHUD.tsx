@@ -2,6 +2,16 @@
 // 戦闘ロジックUI(HUD)。ターン制バトルの状態(自分/敵のHP・コンボ・スコア・手番)を表示する。
 
 type BattlePhase = "playerTurn" | "enemyTurn";
+type DefenseButton = "a" | "b" | "x" | "y" | "r" | "zr";
+
+const DEFENSE_BUTTON_LABELS: Record<DefenseButton, string> = {
+  a: "A",
+  b: "B",
+  x: "X",
+  y: "Y",
+  r: "R",
+  zr: "ZR",
+};
 
 type BattleHUDProps = {
   hp?: number;
@@ -11,6 +21,7 @@ type BattleHUDProps = {
   enemyHp: number;
   enemyMaxHp: number;
   phase: BattlePhase;
+  defenseButton: DefenseButton;
 };
 
 function HudCorner({ className }: { className: string }) {
@@ -25,6 +36,7 @@ export default function BattleHUD({
   enemyHp,
   enemyMaxHp,
   phase,
+  defenseButton,
 }: BattleHUDProps) {
   const hpPercent = Math.round((hp / maxHp) * 100);
   const enemyHpPercent = Math.round((enemyHp / enemyMaxHp) * 100);
@@ -76,12 +88,20 @@ export default function BattleHUD({
         >
           {phase === "playerTurn" ? "YOUR TURN" : "ENEMY TURN"}
         </div>
-        {combo > 0 && (
+        {phase === "playerTurn" && combo > 0 && (
           <div className="text-center">
             <div className="text-6xl font-extrabold tracking-tight text-amber-300 italic drop-shadow-[0_0_12px_rgba(252,211,77,0.5)]">
               {combo}
             </div>
             <div className="mt-1 text-sm tracking-[0.3em] text-amber-200/80">COMBO</div>
+          </div>
+        )}
+        {phase === "enemyTurn" && (
+          <div className="flex flex-col items-center gap-2">
+            <div className="text-xs tracking-widest text-red-300/80">PRESS TO GUARD</div>
+            <div className="flex h-20 w-20 animate-pulse items-center justify-center rounded-full border-4 border-red-400/70 bg-slate-900/80 text-3xl font-extrabold text-red-200 shadow-[0_0_20px_rgba(248,113,113,0.5)]">
+              {DEFENSE_BUTTON_LABELS[defenseButton]}
+            </div>
           </div>
         )}
       </div>

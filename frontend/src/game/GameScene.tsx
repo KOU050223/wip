@@ -16,7 +16,7 @@ import { Canvas, useThree } from "@react-three/fiber";
 import { Text } from "@react-three/drei";
 import { Vector3 } from "three";
 
-import type { Enemy, ComboState, SwingDirection, BattlePhase } from "./types";
+import type { Enemy, ComboState, SwingDirection, BattlePhase, DefenseButton } from "./types";
 import { spawnEnemy, randomDirection } from "./enemySpawn";
 import { calculateDamage } from "./attackDetection";
 import { applyDamage, recoverFromHit } from "./hp";
@@ -26,6 +26,7 @@ import BattleHUD from "./BattleHUD";
 import Lightsaber from "../components/three/Lightsaber";
 import { useJoyConContext } from "../contexts/JoyConContext";
 import { useSwingDetection } from "../hooks/useSwingDetection";
+import { useButtonPress, randomDefenseButton } from "../hooks/useButtonPress";
 import type { JoyConState } from "../lib/joycon/joyConDevice";
 
 // セーバー(柄)の設置位置(方向を取らないので固定)
@@ -33,11 +34,11 @@ const SABER_HIT_POSITION = new Vector3(0, 0.7, -1);
 // 敵の固定表示位置(ターン制なので敵は動かず、この場で向き合う)
 const ENEMY_POSITION = new Vector3(0, 1.7, -4);
 
-const PLAYER_MAX_HP = 100;
+const PLAYER_MAX_HP = 1000;
 const ENEMY_MAX_HP = 500;
 const PLAYER_ATTACK_DAMAGE = 250; // 自分の攻撃1回のダメージ(2回でちょうど討伐できる想定)
-const ENEMY_ATTACK_DAMAGE = 10; // 相手の攻撃1回で受けるダメージ
-const ENEMY_TURN_DELAY_MS = 900; // 相手のターンで「攻撃してくる」までのタメ時間
+const ENEMY_ATTACK_DAMAGE = 100; // 相手の攻撃1回で受けるダメージ(防御失敗時)
+const DEFENSE_WINDOW_MS = 800; // 防御コマンドの入力受付時間
 const HIT_RECOVER_MS = 200; // 被弾演出(赤フラッシュ)の表示時間
 const DYING_DURATION_MS = 300; // 撃破演出の表示時間
 
@@ -95,18 +96,30 @@ function GameLoop({
 }: {
   joyConState: JoyConState | null;
   isJoyConConnected: boolean;
-  onStateChange: (enemy: Enemy, combo: ComboState, playerHp: number, phase: BattlePhase) => void;
+  onStateChange: (
+    enemy: Enemy,
+    combo: ComboState,
+    playerHp: number,
+    phase: BattlePhase,
+    defenseButton: DefenseButton,
+  ) => void;
   onGameOver: (score: number) => void;
 }) {
   const [enemy, setEnemy] = useState<Enemy>(createEnemy);
   const [phase, setPhase] = useState<BattlePhase>("playerTurn");
   const [combo, setCombo] = useState<ComboState>(createInitialComboState());
   const [playerHp, setPlayerHp] = useState(PLAYER_MAX_HP);
+  const [defenseButton, setDefenseButton] = useState<DefenseButton>(randomDefenseButton);
   const lastSwingIdRef = useRef(0);
   const gameOverFiredRef = useRef(false);
   const swing = useSwingDetection(joyConState);
+  const buttonPress = useButtonPress(joyConState);
 
-  // 相手のターンのタイマー内で最新のscoreとonGameOverを読むためのref
+  // 相手のターンの入力受付で使う状態(タイマー・ボタン入力どちらから解決されても一度だけ処理するためのガード)
+  const enemyTurnResolvedRef = useRef(false);
+  const enemyTurnBaselinePressIdRef = useRef(0);
+
+  // タイマー・入力ハンドラ内で最新のscoreとonGameOverを読むためのref
   // (これらを直接useEffectの依存配列に入れると、毎レンダー新しくなるonGameOverのせいで
   //  タイマーが完了前に何度も再スケジュールされてしまうため)
   const comboRef = useRef(combo);
@@ -117,6 +130,32 @@ function GameLoop({
   useEffect(() => {
     onGameOverRef.current = onGameOver;
   }, [onGameOver]);
+
+  // 相手のターンの結果を確定する(防御成功ならノーダメージ、失敗なら確定ダメージ)。
+  // タイマー・ボタン入力のどちらから呼ばれても安全なように、状態はすべて関数型更新で読む。
+  function finishEnemyTurn(defended: boolean) {
+    setCombo((prev) => (defended ? prev : resetCombo(prev)));
+
+    if (defended) {
+      setEnemy((prev) => ({ ...prev, requiredDirection: randomDirection() }));
+      setPhase("playerTurn");
+      return;
+    }
+
+    setPlayerHp((hp) => {
+      const nextHp = Math.max(0, hp - ENEMY_ATTACK_DAMAGE);
+      if (nextHp <= 0) {
+        if (!gameOverFiredRef.current) {
+          gameOverFiredRef.current = true;
+          onGameOverRef.current(comboRef.current.score);
+        }
+      } else {
+        setEnemy((prev) => ({ ...prev, requiredDirection: randomDirection() }));
+        setPhase("playerTurn");
+      }
+      return nextHp;
+    });
+  }
 
   // 自分のターン: 方向が一致した振りだけ攻撃として成立する
   useEffect(() => {
@@ -162,36 +201,38 @@ function GameLoop({
     return () => clearTimeout(timer);
   }, [enemy.state]);
 
-  // 相手のターン: 少し間を置いてから攻撃してくる
-  // phaseのみに依存させることで、他の状態変化やonGameOverの参照が変わっても
-  // タイマーが途中で再スケジュールされず、確実に一度だけ発火するようにしている。
+  // 相手のターン開始: 防御ボタンを決め、DEFENSE_WINDOW_MS以内に入力がなければ防御失敗とする。
+  // phaseのみに依存させている(buttonPress.pressIdは意図的に含めていない)。
+  // 含めてしまうと、下の入力監視effectが解決するのと同時にこのeffectも「新たに突入した」と
+  // 誤認して防御ボタン・受付時間をリセットしてしまい、判定が正しく確定しなくなる。
   useEffect(() => {
     if (phase !== "enemyTurn") return;
+    enemyTurnResolvedRef.current = false;
+    enemyTurnBaselinePressIdRef.current = buttonPress.pressId;
+    setDefenseButton(randomDefenseButton());
+
     const timer = setTimeout(() => {
-      setCombo((prev) => resetCombo(prev));
-      setPlayerHp((hp) => {
-        const nextHp = Math.max(0, hp - ENEMY_ATTACK_DAMAGE);
-
-        if (nextHp <= 0) {
-          if (!gameOverFiredRef.current) {
-            gameOverFiredRef.current = true;
-            onGameOverRef.current(comboRef.current.score);
-          }
-        } else {
-          // 次の自分のターンに備えて切るべき方向を引き直す
-          setEnemy((prev) => ({ ...prev, requiredDirection: randomDirection() }));
-          setPhase("playerTurn");
-        }
-
-        return nextHp;
-      });
-    }, ENEMY_TURN_DELAY_MS);
+      if (enemyTurnResolvedRef.current) return;
+      enemyTurnResolvedRef.current = true;
+      finishEnemyTurn(false);
+    }, DEFENSE_WINDOW_MS);
     return () => clearTimeout(timer);
   }, [phase]);
 
+  // 相手のターン中の入力監視: 防御ウィンドウ開始後に新しいボタン入力があれば即座に成否を判定する。
+  // 正しいボタンなら防御成功、それ以外(間違ったボタン)なら即座に防御失敗になる。
   useEffect(() => {
-    onStateChange(enemy, combo, playerHp, phase);
-  }, [enemy, combo, playerHp, phase, onStateChange]);
+    if (phase !== "enemyTurn") return;
+    if (enemyTurnResolvedRef.current) return;
+    if (buttonPress.pressId === enemyTurnBaselinePressIdRef.current) return; // まだ新しい入力がない
+
+    enemyTurnResolvedRef.current = true;
+    finishEnemyTurn(buttonPress.pressedButton === defenseButton);
+  }, [phase, buttonPress.pressId, buttonPress.pressedButton, defenseButton]);
+
+  useEffect(() => {
+    onStateChange(enemy, combo, playerHp, phase, defenseButton);
+  }, [enemy, combo, playerHp, phase, defenseButton, onStateChange]);
 
   return (
     <>
@@ -215,6 +256,7 @@ export default function GameScene() {
   const [hudHp, setHudHp] = useState(PLAYER_MAX_HP);
   const [hudEnemy, setHudEnemy] = useState<Enemy | null>(null);
   const [hudPhase, setHudPhase] = useState<BattlePhase>("playerTurn");
+  const [hudDefenseButton, setHudDefenseButton] = useState<DefenseButton>("r");
 
   return (
     <div className="relative w-full h-[70vh] min-h-[500px]">
@@ -222,11 +264,12 @@ export default function GameScene() {
         <GameLoop
           joyConState={joyCon.state}
           isJoyConConnected={joyCon.isConnected}
-          onStateChange={(enemy, combo, playerHp, phase) => {
+          onStateChange={(enemy, combo, playerHp, phase, defenseButton) => {
             setHudCombo(combo);
             setHudHp(playerHp);
             setHudEnemy(enemy);
             setHudPhase(phase);
+            setHudDefenseButton(defenseButton);
           }}
           onGameOver={(score) => navigate("/result", { state: { score } })}
         />
@@ -240,6 +283,7 @@ export default function GameScene() {
           enemyHp={hudEnemy?.hp ?? ENEMY_MAX_HP}
           enemyMaxHp={ENEMY_MAX_HP}
           phase={hudPhase}
+          defenseButton={hudDefenseButton}
         />
       </div>
     </div>
