@@ -8,6 +8,7 @@
 // - 敵はまずは「静止したまま出現し、当たったら消える」だけの最小構成。
 
 import { useEffect, useRef, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { Vector3 } from "three";
 
@@ -15,7 +16,7 @@ import type { Enemy, ComboState } from "./types";
 import { spawnEnemy, createSpawnTimer, randomSpawnPosition } from "./enemySpawn";
 import { checkHit, calculateDamage } from "./attackDetection";
 import { applyDamage, finalizeDeath, isDead } from "./hp";
-import { createInitialComboState, registerHit, checkComboTimeout } from "./combo";
+import { createInitialComboState, registerHit, resetCombo } from "./combo";
 import { addScore } from "./score";
 import BattleHUD from "./BattleHUD";
 import Lightsaber from "../components/three/Lightsaber";
@@ -30,8 +31,14 @@ const SABER_TIP_POSITION = SABER_HIT_POSITION.clone().add(new Vector3(0, 1, 0));
 const SPAWN_INTERVAL_MS = 3000;
 const SPAWN_DISTANCE_Z = 8; // 敵が出現する、セーバーから奥(-z)方向への距離
 const ENEMY_APPROACH_SPEED = 1.5; // 敵が手前(+z)へ近づく速度(units/sec)
+const ENEMY_HIT_RADIUS = 1.2; // 判定点(SABER_TIP_POSITION)からこの距離以内なら当たり判定成立
 const MISS_Z_OFFSET = 1.5; // セーバーの位置をこれだけ超えて手前に来たら、避けられた(見逃した)敵として消す
+const MISS_DAMAGE = 10; // 見逃した敵1体につきプレイヤーが受けるダメージ
+const PLAYER_MAX_HP = 100;
 const DYING_DURATION_MS = 300; // 死亡演出の表示時間
+const TIMER_DURATION_SEC = 180; // 制限時間(3分)
+const FEINT_AMPLITUDE_PER_SCORE = 0.002; // スコアが上がるほど敵の左右フェイントを大きくする係数
+const FEINT_MAX_AMPLITUDE = 1.2; // フェイントの振れ幅の上限(units)
 
 function CameraLookAt({ target }: { target: Vector3 }) {
   // Canvasのcameraはposition指定のみだと(0,0,-1)方向を向くだけで、
@@ -59,20 +66,43 @@ function GameLoop({
   joyConState,
   isJoyConConnected,
   onStateChange,
+  onGameOver,
 }: {
   joyConState: JoyConState | null;
   isJoyConConnected: boolean;
-  onStateChange: (enemies: Enemy[], combo: ComboState) => void;
+  onStateChange: (
+    enemies: Enemy[],
+    combo: ComboState,
+    playerHp: number,
+    timeRemaining: number,
+  ) => void;
+  onGameOver: (score: number) => void;
 }) {
   const [enemies, setEnemies] = useState<Enemy[]>([]);
   const [combo, setCombo] = useState<ComboState>(createInitialComboState());
+  const [playerHp, setPlayerHp] = useState(PLAYER_MAX_HP);
+  const [timeRemaining, setTimeRemaining] = useState(TIMER_DURATION_SEC);
   const spawnTimerRef = useRef(createSpawnTimer(SPAWN_INTERVAL_MS));
   const lastSwingIdRef = useRef(0);
+  const startTimeRef = useRef(performance.now());
+  const gameOverFiredRef = useRef(false);
   const swing = useSwingDetection(joyConState);
 
   // 敵出現
   useFrame((_, delta) => {
     const now = performance.now();
+
+    // 制限時間のカウントダウン
+    const remainingSec = Math.max(0, TIMER_DURATION_SEC - (now - startTimeRef.current) / 1000);
+    const roundedRemaining = Math.ceil(remainingSec);
+    if (roundedRemaining !== timeRemaining) {
+      setTimeRemaining(roundedRemaining);
+    }
+    if (remainingSec <= 0 && !gameOverFiredRef.current) {
+      gameOverFiredRef.current = true;
+      onGameOver(combo.score);
+    }
+
     if (spawnTimerRef.current(now)) {
       // 手前方向(x)だけランダムにばらけさせ、奥(-z)から出現させる
       const horizontalJitter = randomSpawnPosition(0.8, 0).x;
@@ -83,28 +113,49 @@ function GameLoop({
       );
       setEnemies((prev) => [
         ...prev,
-        spawnEnemy(spawnPos, { approachSpeed: ENEMY_APPROACH_SPEED }),
+        spawnEnemy(spawnPos, { approachSpeed: ENEMY_APPROACH_SPEED, hitRadius: ENEMY_HIT_RADIUS }),
       ]);
     }
 
-    // コンボのタイムアウトチェック
-    setCombo((prev) => checkComboTimeout(prev, now));
+    setEnemies((prev) => {
+      // 出現中(idle)の敵は奥(-z)から手前(+z)へ近づきつつ、
+      // スコアが上がるほど左右のフェイント(揺さぶり)を大きくする
+      const feintAmplitude = Math.min(FEINT_MAX_AMPLITUDE, combo.score * FEINT_AMPLITUDE_PER_SCORE);
+      const moved = prev.map((e) => {
+        if (e.state !== "idle") return e;
+        const elapsedSec = (now - e.spawnedAt) / 1000;
+        const feintX =
+          e.baseX + Math.sin(elapsedSec * e.feintFrequency + e.feintPhase) * feintAmplitude;
+        return {
+          ...e,
+          position: new Vector3(feintX, e.position.y, e.position.z + e.approachSpeed * delta),
+        };
+      });
 
-    setEnemies((prev) =>
-      prev
-        // 出現中(idle)の敵は奥(-z)から手前(+z)へ近づく
-        .map((e) =>
-          e.state === "idle"
-            ? { ...e, position: e.position.clone().add(new Vector3(0, 0, e.approachSpeed * delta)) }
-            : e,
-        )
-        // dying状態の敵を一定時間後に配列から削除
-        .map((e) =>
-          e.state === "dying" && now - e.spawnedAt > DYING_DURATION_MS ? finalizeDeath(e) : e,
-        )
-        // 死んだ敵、およびセーバーの位置を通り過ぎて避けられた(見逃した)敵を配列から削除
-        .filter((e) => !isDead(e) && e.position.z < SABER_TIP_POSITION.z + MISS_Z_OFFSET),
-    );
+      // セーバーの位置を通り過ぎて避けられた(見逃した)敵の数だけプレイヤーがダメージを受ける
+      const missedCount = moved.filter(
+        (e) => e.state === "idle" && e.position.z >= SABER_TIP_POSITION.z + MISS_Z_OFFSET,
+      ).length;
+      if (missedCount > 0) {
+        const nextHp = Math.max(0, playerHp - missedCount * MISS_DAMAGE);
+        setPlayerHp(nextHp);
+        setCombo((prev) => resetCombo(prev));
+        if (nextHp <= 0 && !gameOverFiredRef.current) {
+          gameOverFiredRef.current = true;
+          onGameOver(combo.score);
+        }
+      }
+
+      return (
+        moved
+          // dying状態の敵を一定時間後に配列から削除
+          .map((e) =>
+            e.state === "dying" && now - e.spawnedAt > DYING_DURATION_MS ? finalizeDeath(e) : e,
+          )
+          // 死んだ敵、および見逃した敵を配列から削除
+          .filter((e) => !isDead(e) && e.position.z < SABER_TIP_POSITION.z + MISS_Z_OFFSET)
+      );
+    });
   });
 
   // Joy-Conの振り検出 → 攻撃判定
@@ -127,8 +178,8 @@ function GameLoop({
   }, [swing.swingId, swing.swingPower, isJoyConConnected, enemies]);
 
   useEffect(() => {
-    onStateChange(enemies, combo);
-  }, [enemies, combo, onStateChange]);
+    onStateChange(enemies, combo, playerHp, timeRemaining);
+  }, [enemies, combo, playerHp, timeRemaining, onStateChange]);
 
   return (
     <>
@@ -149,7 +200,10 @@ function GameLoop({
 
 export default function GameScene() {
   const joyCon = useJoyConContext();
+  const navigate = useNavigate();
   const [hudCombo, setHudCombo] = useState<ComboState>(createInitialComboState());
+  const [hudHp, setHudHp] = useState(PLAYER_MAX_HP);
+  const [hudTimeRemaining, setHudTimeRemaining] = useState(TIMER_DURATION_SEC);
 
   return (
     <div className="relative w-full h-[70vh] min-h-[500px]">
@@ -157,13 +211,22 @@ export default function GameScene() {
         <GameLoop
           joyConState={joyCon.state}
           isJoyConConnected={joyCon.isConnected}
-          onStateChange={(_enemies, combo) => {
+          onStateChange={(_enemies, combo, playerHp, timeRemaining) => {
             setHudCombo(combo);
+            setHudHp(playerHp);
+            setHudTimeRemaining(timeRemaining);
           }}
+          onGameOver={(score) => navigate("/result", { state: { score } })}
         />
       </Canvas>
       <div className="absolute inset-0 pointer-events-none">
-        <BattleHUD combo={hudCombo.combo} score={hudCombo.score} />
+        <BattleHUD
+          combo={hudCombo.combo}
+          score={hudCombo.score}
+          hp={hudHp}
+          maxHp={PLAYER_MAX_HP}
+          timeRemaining={hudTimeRemaining}
+        />
       </div>
     </div>
   );

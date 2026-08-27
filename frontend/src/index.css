@@ -1,10 +1,78 @@
 @import "tailwindcss";
 
+@theme {
+  --font-display: "Orbitron", sans-serif;
+}
+
 :root {
-  color-scheme: light dark;
+  color-scheme: dark;
 }
 
 body {
   margin: 0;
   min-height: 100svh;
+  color: #dff3ff;
+  background-color: #04050a;
+  background-attachment: fixed;
+  background-repeat:
+    repeat, repeat, repeat, repeat, repeat, repeat, repeat, repeat, repeat, repeat, no-repeat,
+    no-repeat;
+  background-size:
+    220px 220px,
+    220px 220px,
+    220px 220px,
+    220px 220px,
+    220px 220px,
+    220px 220px,
+    220px 220px,
+    220px 220px,
+    220px 220px,
+    220px 220px,
+    100% 100%,
+    100% 100%;
+  /* 星空(小さな点を散らして220pxタイルで繰り返す) + 奥に淡いネビュラ(星雲)の光 */
+  background-image:
+    radial-gradient(1.5px 1.5px at 15% 20%, #ffffff, transparent),
+    radial-gradient(1.5px 1.5px at 65% 8%, #ffffff, transparent),
+    radial-gradient(1px 1px at 40% 45%, #ffffff, transparent),
+    radial-gradient(1px 1px at 90% 30%, #ffffff, transparent),
+    radial-gradient(1.5px 1.5px at 25% 70%, #ffffff, transparent),
+    radial-gradient(1px 1px at 75% 60%, #ffffff, transparent),
+    radial-gradient(1px 1px at 10% 90%, #ffffff, transparent),
+    radial-gradient(1.5px 1.5px at 55% 85%, #ffffff, transparent),
+    radial-gradient(1px 1px at 85% 95%, #ffffff, transparent),
+    radial-gradient(2px 2px at 50% 15%, #9fd8ff, transparent),
+    radial-gradient(ellipse 80% 50% at 50% 0%, rgba(76, 201, 240, 0.12), transparent 70%),
+    radial-gradient(ellipse 60% 40% at 80% 100%, rgba(136, 85, 255, 0.14), transparent 70%);
+}
+
+/* 見出し用: 起動画面のような、数回明滅してから点灯する演出 */
+@keyframes title-flicker {
+  0% {
+    opacity: 0;
+    filter: blur(4px);
+  }
+  10% {
+    opacity: 1;
+    filter: blur(0);
+  }
+  12% {
+    opacity: 0.3;
+  }
+  14% {
+    opacity: 1;
+  }
+  20% {
+    opacity: 0.6;
+  }
+  24% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 1;
+  }
+}
+
+.title-flicker {
+  animation: title-flicker 1.2s ease-out both;
 }

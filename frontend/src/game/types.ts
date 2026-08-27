@@ -14,6 +14,9 @@ export type Enemy = {
   spawnedAt: number;
   hitRadius: number; // 当たり判定用の半径(Bounding Sphere方式)
   approachSpeed: number; // 奥(-z)から手前(+z)へ近づく速度(units/sec)
+  baseX: number; // フェイント(左右の揺さぶり)の中心となるx座標
+  feintPhase: number; // フェイントの位相(個体ごとにばらけさせる)
+  feintFrequency: number; // フェイントの周期の速さ(個体ごとにばらけさせる)
 };
 
 export type GameEvent =

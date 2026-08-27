@@ -25,6 +25,9 @@ export function spawnEnemy(
     spawnedAt: performance.now(),
     hitRadius: options?.hitRadius ?? 0.5,
     approachSpeed: options?.approachSpeed ?? 1.5,
+    baseX: position.x,
+    feintPhase: Math.random() * Math.PI * 2,
+    feintFrequency: 1.5 + Math.random() * 1.5,
   };
 }
 
