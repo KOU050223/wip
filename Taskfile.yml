@@ -9,6 +9,46 @@ tasks:
       - task --list
     silent: true
 
+  dev:
+    desc: Postgres・バックエンド・フロントエンドをまとめて起動
+    cmds:
+      # バックエンドはDB未接続だと起動時に落ちるため、healthyになるまで待つ。
+      - task: db:up
+      - task: dev:servers
+
+  dev:servers:
+    internal: true
+    deps:
+      - dev:backend
+      - dev:frontend
+
+  dev:backend:
+    internal: true
+    dir: backend
+    cmds:
+      - go run ./cmd/server
+
+  dev:frontend:
+    internal: true
+    dir: frontend
+    cmds:
+      - npm run dev
+
+  db:up:
+    desc: ローカル開発用のPostgresを起動（healthyになるまで待つ）
+    cmds:
+      - docker compose up -d --wait
+
+  db:down:
+    desc: ローカル開発用のPostgresを停止（データは保持）
+    cmds:
+      - docker compose down
+
+  db:reset:
+    desc: ローカル開発用のPostgresを停止してデータを削除
+    cmds:
+      - docker compose down -v
+
   ci:
     desc: GitHub Actions と同じ品質チェックを実行
     deps:
