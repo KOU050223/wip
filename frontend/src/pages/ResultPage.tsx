@@ -1,15 +1,21 @@
 import { Link, useLocation } from "react-router-dom";
 
-type ResultLocationState = { score?: number };
+type ResultLocationState = { score?: number; result?: "clear" | "over" };
 
 function ResultPage() {
   const location = useLocation();
-  const score = (location.state as ResultLocationState | null)?.score;
+  const state = location.state as ResultLocationState | null;
+  const score = state?.score;
+  const isClear = state?.result === "clear";
 
   return (
     <section className="min-h-screen flex flex-col items-center justify-center gap-12 px-6 text-center">
-      <h1 className="title-flicker font-display text-3xl md:text-5xl tracking-[0.3em] text-cyan-200 drop-shadow-[0_0_20px_rgba(76,201,240,0.5)]">
-        リザルト
+      <h1
+        className={`title-flicker font-display text-3xl md:text-5xl tracking-[0.3em] drop-shadow-[0_0_20px_rgba(76,201,240,0.5)] ${
+          isClear ? "text-amber-300" : "text-cyan-200"
+        }`}
+      >
+        {isClear ? "MISSION CLEAR" : "GAME OVER"}
       </h1>
       <div>
         <div className="text-xs tracking-widest text-cyan-400/70">SCORE</div>
