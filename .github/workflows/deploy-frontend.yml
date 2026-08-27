@@ -11,6 +11,7 @@ on:
     paths:
       - 'frontend/**'
       - '.github/workflows/deploy-frontend.yml'
+  workflow_dispatch:
 
 # 同一ブランチへの連続プッシュでアップロードが競合しないよう直列化する。
 concurrency:
@@ -78,7 +79,8 @@ jobs:
 
   deploy:
     name: Production deploy
-    if: github.event_name == 'push'
+    # 手動実行(workflow_dispatch)でも本番デプロイしたいので、PR以外を対象にする。
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     permissions:
       contents: read
