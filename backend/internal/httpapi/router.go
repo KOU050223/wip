@@ -11,6 +11,7 @@ import (
 	"uuid"
 
 	"github.com/KOU050223/wip/backend/internal/config"
+	"github.com/KOU050223/wip/backend/internal/domain"
 	"github.com/KOU050223/wip/backend/internal/realtime"
 	"github.com/KOU050223/wip/backend/internal/usecase"
 	"github.com/gin-gonic/gin"
@@ -59,6 +60,11 @@ type roomClientEvent struct {
 
 type ErrorResponse struct {
 	Error string `json:"error"`
+}
+
+// RankingsResponse はスコア順のランキング一覧を返す。
+type RankingsResponse struct {
+	Rankings []domain.Score `json:"rankings"`
 }
 
 func NewRouter(scoreUsecase *usecase.ScoreUsecase, allowOrigins []string, pingDatabase PingFunc) *gin.Engine {
@@ -391,6 +397,18 @@ func (r *Router) createScore(c *gin.Context) {
 	c.JSON(http.StatusCreated, score)
 }
 
+// rankings returns the score ranking.
+//
+// @Summary      Get rankings
+// @Description  Returns scores ordered by score (desc), then clear time (asc), then created time (asc).
+// @Tags         scores
+// @ID           getRankings
+// @Produce      json
+// @Param        limit  query     int  false  "Max number of entries to return (1-100, default 10)"
+// @Success      200    {object}  RankingsResponse
+// @Failure      400    {object}  ErrorResponse
+// @Failure      500    {object}  ErrorResponse
+// @Router       /api/rankings [get]
 func (r *Router) rankings(c *gin.Context) {
 	limit := 0
 	if rawLimit := c.Query("limit"); rawLimit != "" {

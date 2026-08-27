@@ -9,6 +9,47 @@
     "host": "localhost:8080",
     "basePath": "/",
     "paths": {
+        "/api/rankings": {
+            "get": {
+                "description": "Returns scores ordered by score (desc), then clear time (asc), then created time (asc).",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "scores"
+                ],
+                "summary": "Get rankings",
+                "operationId": "getRankings",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "Max number of entries to return (1-100, default 10)",
+                        "name": "limit",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/httpapi.RankingsResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/httpapi.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/httpapi.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/api/scores": {
             "post": {
                 "description": "Saves a player's score, max combo, and clear time.",
@@ -80,6 +121,17 @@
             "properties": {
                 "error": {
                     "type": "string"
+                }
+            }
+        },
+        "httpapi.RankingsResponse": {
+            "type": "object",
+            "properties": {
+                "rankings": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/domain.Score"
+                    }
                 }
             }
         },
