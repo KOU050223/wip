@@ -8,5 +8,97 @@
     },
     "host": "localhost:8080",
     "basePath": "/",
-    "paths": {}
+    "paths": {
+        "/api/scores": {
+            "post": {
+                "description": "Saves a player's score, max combo, and clear time.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "scores"
+                ],
+                "summary": "Save score",
+                "operationId": "saveScore",
+                "parameters": [
+                    {
+                        "description": "Score payload",
+                        "name": "score",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/usecase.CreateScoreInput"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "$ref": "#/definitions/domain.Score"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/httpapi.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        }
+    },
+    "definitions": {
+        "domain.Score": {
+            "type": "object",
+            "properties": {
+                "clear_time": {
+                    "type": "integer"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "integer"
+                },
+                "max_combo": {
+                    "type": "integer"
+                },
+                "player_name": {
+                    "type": "string"
+                },
+                "score": {
+                    "type": "integer"
+                }
+            }
+        },
+        "httpapi.ErrorResponse": {
+            "type": "object",
+            "properties": {
+                "error": {
+                    "type": "string"
+                }
+            }
+        },
+        "usecase.CreateScoreInput": {
+            "type": "object",
+            "properties": {
+                "clear_time": {
+                    "type": "integer"
+                },
+                "max_combo": {
+                    "type": "integer"
+                },
+                "player_name": {
+                    "type": "string"
+                },
+                "score": {
+                    "type": "integer"
+                }
+            }
+        }
+    }
 }

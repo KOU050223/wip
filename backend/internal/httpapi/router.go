@@ -23,6 +23,10 @@ type Router struct {
 	pingDatabase PingFunc
 }
 
+type ErrorResponse struct {
+	Error string `json:"error"`
+}
+
 func NewRouter(scoreUsecase *usecase.ScoreUsecase, allowOrigins []string, pingDatabase PingFunc) *gin.Engine {
 	gin.SetMode(gin.ReleaseMode)
 
@@ -49,6 +53,18 @@ func (r *Router) health(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"status": "ok"})
 }
 
+// createScore saves a player's game score.
+//
+// @Summary      Save score
+// @Description  Saves a player's score, max combo, and clear time.
+// @Tags         scores
+// @ID           saveScore
+// @Accept       json
+// @Produce      json
+// @Param        score  body      usecase.CreateScoreInput  true  "Score payload"
+// @Success      201    {object}  domain.Score
+// @Failure      400    {object}  ErrorResponse
+// @Router       /api/scores [post]
 func (r *Router) createScore(c *gin.Context) {
 	var input usecase.CreateScoreInput
 	if err := c.ShouldBindJSON(&input); err != nil {
