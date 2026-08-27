@@ -85,11 +85,9 @@ function GameLoop({
     setEnemies((prev) =>
       prev
         .map((e) =>
-          e.state === "dying" && now - e.spawnedAt > DYING_DURATION_MS
-            ? finalizeDeath(e)
-            : e
+          e.state === "dying" && now - e.spawnedAt > DYING_DURATION_MS ? finalizeDeath(e) : e,
         )
-        .filter((e) => !isDead(e))
+        .filter((e) => !isDead(e)),
     );
   });
 
@@ -105,9 +103,7 @@ function GameLoop({
     const damage = calculateDamage(joyCon.swingPower);
     const now = performance.now();
 
-    setEnemies((prev) =>
-      prev.map((e) => (e.id === hitEnemy.id ? applyDamage(e, damage) : e))
-    );
+    setEnemies((prev) => prev.map((e) => (e.id === hitEnemy.id ? applyDamage(e, damage) : e)));
     setCombo((prev) => {
       const next = registerHit(prev, now);
       return { ...next, score: addScore(prev.score, next.combo) };
