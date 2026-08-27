@@ -10,11 +10,12 @@
 //   方向が違っても不発になるだけで、自分のターンは継続する(何度でも振り直せる)。
 // - 敵は1体ずつ固定位置に現れ、動き回らない。
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Canvas, useThree } from "@react-three/fiber";
-import { Text } from "@react-three/drei";
-import { Vector3 } from "three";
+import { Text, useGLTF } from "@react-three/drei";
+import { Box3, Mesh, MeshStandardMaterial, Vector3 } from "three";
+import { clone as cloneSkeleton } from "three/examples/jsm/utils/SkeletonUtils.js";
 
 import type { Enemy, ComboState, SwingDirection, BattlePhase, DefenseButton } from "./types";
 import { spawnEnemy, randomDirection } from "./enemySpawn";
@@ -59,19 +60,47 @@ const DIRECTION_ARROWS: Record<SwingDirection, string> = {
   right: "→",
 };
 
-function EnemyMesh({ enemy }: { enemy: Enemy }) {
-  const opacity = enemy.state === "dying" ? 0.3 : 1;
-  const color = enemy.state === "hit" ? "#ff6b6b" : "#8855ff";
+// 敵モデル本体。同じモデルを複数体で使い回してもボーン等が衝突しないよう、
+// ロード済みシーンをそのまま使わずSkeletonUtils.cloneで複製してから表示する。
+function EnemyModel({ modelPath, state }: { modelPath: string; state: Enemy["state"] }) {
+  const { scene } = useGLTF(modelPath);
+  // モデルの原点がジオメトリ中心と一致しない書き出しがあるため、
+  // 底面が接地しXZ中央に来るようにバウンディングボックスから補正する。
+  const model = useMemo(() => {
+    const cloned = cloneSkeleton(scene);
+    const box = new Box3().setFromObject(cloned);
+    const center = box.getCenter(new Vector3());
+    cloned.position.set(-center.x, -box.min.y, -center.z);
+    return cloned;
+  }, [scene]);
 
+  useEffect(() => {
+    const isHit = state === "hit";
+    const isDying = state === "dying";
+    model.traverse((child) => {
+      if (!(child instanceof Mesh)) return;
+      const materials = Array.isArray(child.material) ? child.material : [child.material];
+      for (const material of materials) {
+        material.transparent = isDying;
+        material.opacity = isDying ? 0.35 : 1;
+        if (material instanceof MeshStandardMaterial) {
+          material.emissive.set(isHit ? "#ff0000" : "#000000");
+          material.emissiveIntensity = isHit ? 0.8 : 0;
+        }
+      }
+    });
+  }, [model, state]);
+
+  return <primitive object={model} />;
+}
+
+function EnemyMesh({ enemy }: { enemy: Enemy }) {
   return (
     <group position={enemy.position}>
-      <mesh>
-        <boxGeometry args={[0.8, 1.6, 0.8]} />
-        <meshStandardMaterial color={color} transparent opacity={opacity} />
-      </mesh>
+      <EnemyModel modelPath={enemy.modelPath} state={enemy.state} />
       {enemy.state !== "dying" && (
         <Text
-          position={[0, 0.3, 0.41]}
+          position={[0, 1.6, 0.41]}
           fontSize={0.6}
           color="#ffe066"
           anchorX="center"
@@ -83,6 +112,12 @@ function EnemyMesh({ enemy }: { enemy: Enemy }) {
     </group>
   );
 }
+
+useGLTF.preload("/models/food.glb");
+useGLTF.preload("/models/gamema.glb");
+useGLTF.preload("/models/hitonoakui.glb");
+useGLTF.preload("/models/sabori.glb");
+useGLTF.preload("/models/suima.glb");
 
 function createEnemy(): Enemy {
   return spawnEnemy(ENEMY_POSITION.clone(), { maxHp: ENEMY_MAX_HP });
