@@ -84,6 +84,12 @@ const DIRECTION_ARROWS: Record<SwingDirection, string> = {
 // モデルごとに書き出し時のスケールがバラバラなため、これに合わせて正規化する。
 const MODEL_TARGET_HEIGHT = 1.6;
 
+// モデルによっては書き出し時の正面がZ+/Z-逆になっているため、個別に補正する。
+// DV.glbはそのままだとプレイヤーに背を向けてしまうため180度回転させる。
+const MODEL_FACING_OFFSET: Record<string, number> = {
+  "/models/DV.glb": Math.PI,
+};
+
 // 敵モデル本体。同じモデルを複数体で使い回してもボーン等が衝突しないよう、
 // ロード済みシーンをそのまま使わずSkeletonUtils.cloneで複製してから表示する。
 function EnemyModel({ modelPath, state }: { modelPath: string; state: Enemy["state"] }) {
@@ -107,8 +113,9 @@ function EnemyModel({ modelPath, state }: { modelPath: string; state: Enemy["sta
     const scale = size.y > 0 ? MODEL_TARGET_HEIGHT / size.y : 1;
     cloned.scale.setScalar(scale);
     cloned.position.set(-center.x * scale, -box.min.y * scale, -center.z * scale);
+    cloned.rotation.y = MODEL_FACING_OFFSET[modelPath] ?? 0;
     return cloned;
-  }, [scene]);
+  }, [scene, modelPath]);
 
   useEffect(() => {
     const isHit = state === "hit";
