@@ -90,6 +90,13 @@ const MODEL_FACING_OFFSET: Record<string, number> = {
   "/models/DV.glb": Math.PI,
 };
 
+// 高さをMODEL_TARGET_HEIGHTに揃えるだけだと、モデルによっては
+// (gamema.glbなど)横幅・奥行きが目立って画面上で大きく見えすぎるため、
+// 個別に追加の縮小率をかけて調整する。
+const MODEL_SCALE_OFFSET: Record<string, number> = {
+  "/models/gamema.glb": 0.7,
+};
+
 // 敵モデル本体。同じモデルを複数体で使い回してもボーン等が衝突しないよう、
 // ロード済みシーンをそのまま使わずSkeletonUtils.cloneで複製してから表示する。
 function EnemyModel({ modelPath, state }: { modelPath: string; state: Enemy["state"] }) {
@@ -110,7 +117,8 @@ function EnemyModel({ modelPath, state }: { modelPath: string; state: Enemy["sta
     const box = new Box3().setFromObject(cloned);
     const size = box.getSize(new Vector3());
     const center = box.getCenter(new Vector3());
-    const scale = size.y > 0 ? MODEL_TARGET_HEIGHT / size.y : 1;
+    const scale =
+      (size.y > 0 ? MODEL_TARGET_HEIGHT / size.y : 1) * (MODEL_SCALE_OFFSET[modelPath] ?? 1);
     cloned.scale.setScalar(scale);
     cloned.position.set(-center.x * scale, -box.min.y * scale, -center.z * scale);
     cloned.rotation.y = MODEL_FACING_OFFSET[modelPath] ?? 0;

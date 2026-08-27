@@ -13,7 +13,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Canvas, useFrame } from "@react-three/fiber";
-import { Text, useGLTF } from "@react-three/drei";
+import { Stars, Text, useGLTF } from "@react-three/drei";
 import { createXRStore, XR, XRSpace, useXRInputSourceStateContext } from "@react-three/xr";
 import { Box3, Group, Line3, Mesh, MeshStandardMaterial, Vector3 } from "three";
 import { clone as cloneSkeleton } from "three/examples/jsm/utils/SkeletonUtils.js";
@@ -34,10 +34,21 @@ import {
   HITBOX_MARGIN,
 } from "../hooks/vrEnemyHitbox";
 import { EnemyPositionContext, useEnemyPositionRef } from "../hooks/vrEnemyPosition";
+import VRBattleHUD from "./VRBattleHUD";
 
 // Joy-Con版(GameScene.tsx)と揃えた数値。バランスは無変更で流用する。
 const ENEMY_NEAR_POSITION = new Vector3(0, 0, -2.5); // 自分のターン中、敵がいる位置(足元基準)
 const ENEMY_FAR_POSITION = new Vector3(0, 0, -6); // 相手のターン中、ポリゴンを飛ばす位置まで離れる
+
+// HUDパネル: 手やヘッドセットに追従させず、敵の近距離側の脇にワールド固定で置く。
+// 初期カメラ位置(下記VRGameScene参照)あたりを向くよう、置いた位置から
+// そのおおよその視点方向を計算してrotation.yに反映しておく。
+const HUD_ANCHOR_POSITION = new Vector3(ENEMY_NEAR_POSITION.x + 1.1, 1.3, ENEMY_NEAR_POSITION.z);
+const HUD_REFERENCE_VIEWPOINT = new Vector3(0, 1.3, 2);
+const HUD_ROTATION_Y = Math.atan2(
+  HUD_REFERENCE_VIEWPOINT.x - HUD_ANCHOR_POSITION.x,
+  HUD_REFERENCE_VIEWPOINT.z - HUD_ANCHOR_POSITION.z,
+);
 const PLAYER_MAX_HP = 1000;
 const ENEMY_MAX_HP = 500;
 const PLAYER_ATTACK_DAMAGE = 250;
@@ -49,14 +60,65 @@ const TURN_COOLDOWN_MS = 300;
 // 敵が離れてポリゴンを飛ばす防御演出まわり
 const ENEMY_RETREAT_MS = 500; // 自分の攻撃直後、敵が離れきるまでの待ち時間(退避アニメの尺)
 const ENEMY_MOVE_LERP_SPEED = 4; // 敵の近寄る/離れるアニメーションの追従速度
-const PROJECTILE_TRAVEL_MS = 1200; // ポリゴンが敵からプレイヤーまで届く時間(=防御の受付時間)
 const PROJECTILE_HIT_RADIUS = 0.25; // 剣先がこの距離まで近づいたら斬れたとみなす
 const PROJECTILE_SPAWN_Y = 1.4; // ポリゴンを飛ばす高さの目安
-const PROJECTILE_SPAWN_POSITION = new Vector3(
-  ENEMY_FAR_POSITION.x,
-  PROJECTILE_SPAWN_Y,
-  ENEMY_FAR_POSITION.z,
-);
+
+// 単調にならないよう、1ウェーブごとに「本数(方向)」「速度」「軌道の曲がり方」を
+// ランダムに変える。全部ミスなく斬れて初めて防御成功、1本でも受けたら被弾(ダメージは今まで通り1回分)。
+const PROJECTILE_TRAVEL_MS_MIN = 800; // 速い弾
+const PROJECTILE_TRAVEL_MS_MAX = 1500; // 遅い弾
+const PROJECTILE_CURVE_MIN = 0.3; // 直進に近い軌道
+const PROJECTILE_CURVE_MAX = 1.0; // 大きく弧を描く軌道
+const PROJECTILE_ANGLE_POOL = [-60, -30, 0, 30, 60]; // 度。0が正面、負が左、正が右
+const NORMAL_WAVE_SIZE = [1, 2] as const; // 通常敵: 1〜2本同時
+const BOSS_WAVE_SIZE = [2, 3] as const; // ボス: 2〜3本同時
+
+function randomBetween(min: number, max: number): number {
+  return min + Math.random() * (max - min);
+}
+
+function randomInt(min: number, max: number): number {
+  return Math.floor(randomBetween(min, max + 1));
+}
+
+// ボールは実際に敵がいる位置(退避後の座標)から飛んでくるようにする。
+// angleDegは出現位置ではなく、直進経路に対してどちら向き・どれくらい弧を描くかの
+// 演出だけに使う(複数方向からの攻撃感は軌道の膨らみ方の違いで表現する)。
+function spawnPositionFromEnemy(enemyPos: Vector3): Vector3 {
+  return new Vector3(enemyPos.x, PROJECTILE_SPAWN_Y, enemyPos.z);
+}
+
+// 直進(spawn→プレイヤー)に対して水平に垂直な方向へランダムな強さで膨らませ、
+// 弓なりの軌道(フェイント)を作るための軸ベクトル。
+function curveAxisForAngle(angleDeg: number): Vector3 {
+  const rad = (angleDeg * Math.PI) / 180;
+  const perpendicular = new Vector3(Math.cos(rad), 0, Math.sin(rad));
+  const strength = randomBetween(PROJECTILE_CURVE_MIN, PROJECTILE_CURVE_MAX);
+  const sign = Math.random() < 0.5 ? -1 : 1;
+  return perpendicular.multiplyScalar(strength * sign);
+}
+
+// 1ウェーブ分の出現角度をランダムに(重複なく)選ぶ。
+function pickWaveAngles(isBoss: boolean): number[] {
+  const [min, max] = isBoss ? BOSS_WAVE_SIZE : NORMAL_WAVE_SIZE;
+  const count = randomInt(min, max);
+  const pool = [...PROJECTILE_ANGLE_POOL];
+  const picked: number[] = [];
+  for (let i = 0; i < count && pool.length > 0; i++) {
+    const idx = Math.floor(Math.random() * pool.length);
+    picked.push(pool[idx]);
+    pool.splice(idx, 1);
+  }
+  return picked;
+}
+
+type ProjectileInstance = {
+  id: number;
+  spawnPosition: Vector3;
+  startTime: number;
+  travelMs: number;
+  curveAxis: Vector3;
+};
 
 const BOSS_APPEAR_AFTER_MS = 2 * 60 * 1000;
 const BOSS_MAX_HP = 2500;
@@ -79,6 +141,24 @@ const MODEL_FACING_OFFSET: Record<string, number> = {
   "/models/DV.glb": Math.PI,
 };
 
+// 高さをMODEL_TARGET_HEIGHTに揃えるだけだと、モデルによっては
+// (gamema.glbなど)横幅・奥行きが目立って画面上で大きく見えすぎるため、
+// 個別に追加の縮小率をかけて調整する(GameScene.tsxと同じ値)。
+const MODEL_SCALE_OFFSET: Record<string, number> = {
+  "/models/gamema.glb": 0.7,
+};
+
+// 背景が真っ黒だと奥行きが感じられずボスの視認性も落ちるため、
+// 濃紺のグラデーションに近い単色背景+星の粒子で宇宙空間らしくする。
+function SpaceBackground() {
+  return (
+    <>
+      <color attach="background" args={["#05050f"]} />
+      <Stars radius={90} depth={60} count={4000} factor={4} saturation={0} fade speed={0.5} />
+    </>
+  );
+}
+
 // 敵モデル本体(GameScene.tsxのEnemyModelと同じ正規化ロジック)。
 // 高さはMODEL_TARGET_HEIGHTに揃うが、横幅・奥行きはモデルの縦横比次第でばらつくため、
 // 実際にスケーリングした後の実寸をEnemyHitboxSizeContext経由で共有し、
@@ -98,7 +178,8 @@ function EnemyModel({ modelPath, state }: { modelPath: string; state: Enemy["sta
     const box = new Box3().setFromObject(cloned);
     const size = box.getSize(new Vector3());
     const center = box.getCenter(new Vector3());
-    const scale = size.y > 0 ? MODEL_TARGET_HEIGHT / size.y : 1;
+    const scale =
+      (size.y > 0 ? MODEL_TARGET_HEIGHT / size.y : 1) * (MODEL_SCALE_OFFSET[modelPath] ?? 1);
     cloned.scale.setScalar(scale);
     cloned.position.set(-center.x * scale, -box.min.y * scale, -center.z * scale);
     cloned.rotation.y = MODEL_FACING_OFFSET[modelPath] ?? 0;
@@ -193,34 +274,22 @@ function EnemyMesh({ enemy, phase }: { enemy: Enemy; phase: BattlePhase }) {
           {DIRECTION_ARROWS[enemy.requiredDirection]}
         </Text>
       )}
-      {/* Phase 3でVRBattleHUDに置き換えるまでの仮表示。モデル幅に関わらず隠れないよう頭上に置く */}
-      <Text
-        position={[0, MODEL_TARGET_HEIGHT + 0.7, 0]}
-        fontSize={0.15}
-        color={enemy.isBoss ? "#ff6666" : "#4cc9f0"}
-        anchorX="center"
-        anchorY="middle"
-      >
-        {`${enemy.isBoss ? "DARTH VADER" : "ENEMY"}  HP ${enemy.hp}/${enemy.maxHp}`}
-      </Text>
     </group>
   );
 }
 
-// 相手のターンに敵が飛ばしてくるポリゴン(発光球)。プレイヤーの頭(カメラ)を
-// 目掛けて直進し、刃(柄側の端〜剣先の線分)が一定距離まで近づいたら
-// 斬れたものとしてonHitを呼ぶ。剣先の一点だけでなく刃全体で判定するため、
-// 根元寄りで弾いても防御成功になる。
-// onHit自体は呼び出し側(VRGameLoop)で「既に決着済みか」をガードするため、
+// 相手のターンに敵が飛ばしてくるポリゴン(発光球)の1本分。プレイヤーの頭(カメラ)を
+// 目掛けて進むが、直進だけだと単調なので出現角度ごとに横方向へ弓なりに膨らむ軌道
+// (curveAxis)と、本ごとにバラつく速度(travelMs)を持たせて読みにくくしている。
+// 刃(柄側の端〜剣先の線分)が一定距離まで近づいたら斬れたものとしてonResolve(true)を呼ぶ。
+// onResolve自体は呼び出し側(VRGameLoop)で「既に決着済みか」をガードするため、
 // ここでは範囲内にいる間毎フレーム呼んでも問題ない。
 function ProjectileVisual({
-  spawnPosition,
-  startTime,
-  onHit,
+  instance,
+  onResolve,
 }: {
-  spawnPosition: Vector3;
-  startTime: number;
-  onHit: () => void;
+  instance: ProjectileInstance;
+  onResolve: (id: number, sliced: boolean) => void;
 }) {
   const meshRef = useRef<Mesh>(null);
   const saberTip = useSaberTipRef();
@@ -231,19 +300,22 @@ function ProjectileVisual({
   useFrame((state) => {
     const mesh = meshRef.current;
     if (!mesh) return;
-    const t = Math.min(1, (performance.now() - startTime) / PROJECTILE_TRAVEL_MS);
-    mesh.position.lerpVectors(spawnPosition, state.camera.position, t);
+    const t = Math.min(1, (performance.now() - instance.startTime) / instance.travelMs);
+    mesh.position.lerpVectors(instance.spawnPosition, state.camera.position, t);
+    // 進行度0→1に対してsin(πt)は0→1→0と山なりになるため、経路の中間で
+    // curveAxis方向に最大まで膨らみ、最後はプレイヤーの正面へ収束する弓なりの軌道になる。
+    mesh.position.addScaledVector(instance.curveAxis, Math.sin(t * Math.PI));
 
     bladeLineRef.current.set(saberBase.current, saberTip.current);
     bladeLineRef.current.closestPointToPoint(mesh.position, true, closestPointRef.current);
 
     if (mesh.position.distanceTo(closestPointRef.current) < PROJECTILE_HIT_RADIUS) {
-      onHit();
+      onResolve(instance.id, true);
     }
   });
 
   return (
-    <mesh ref={meshRef} position={spawnPosition}>
+    <mesh ref={meshRef} position={instance.spawnPosition}>
       <sphereGeometry args={[0.12, 12, 12]} />
       <meshStandardMaterial
         color="#ff3344"
@@ -290,12 +362,18 @@ function VRGameLoop({
   const [phase, setPhase] = useState<BattlePhase>("playerTurn");
   const [combo, setCombo] = useState<ComboState>(createInitialComboState());
   const [playerHp, setPlayerHp] = useState(PLAYER_MAX_HP);
-  const [projectile, setProjectile] = useState<{ id: number; startTime: number } | null>(null);
+  const [projectiles, setProjectiles] = useState<ProjectileInstance[]>([]);
+  const enemyPosition = useEnemyPositionRef();
   const gameOverFiredRef = useRef(false);
   const projectileIdRef = useRef(0);
 
-  const enemyTurnResolvedRef = useRef(false);
-  const projectileTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // 1ウェーブ(同時に飛んでくる複数本)ぶんの決着待ち管理。
+  // resolvedIdsRefは「このIDはもう斬った/被弾判定済み」の二重処理防止ガード、
+  // waveUnresolvedRefは残り本数のカウンタ、waveHadMissRefは1本でも被弾したかのフラグ。
+  const resolvedIdsRef = useRef(new Set<number>());
+  const waveTimersRef = useRef(new Map<number, ReturnType<typeof setTimeout>>());
+  const waveUnresolvedRef = useRef(0);
+  const waveHadMissRef = useRef(false);
   const cooldownTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const attacksRemainingRef = useRef(1);
   const bossPendingRef = useRef(false);
@@ -324,32 +402,57 @@ function VRGameLoop({
     return createEnemy();
   }
 
-  // 相手のターン1回分: ポリゴンを1発飛ばし、斬れなければPROJECTILE_TRAVEL_MS後に被弾確定する。
-  function spawnProjectile() {
-    if (projectileTimerRef.current) clearTimeout(projectileTimerRef.current);
-    enemyTurnResolvedRef.current = false;
-    projectileIdRef.current += 1;
-    const startTime = performance.now();
-    setProjectile({ id: projectileIdRef.current, startTime });
+  // 相手のターン1回分: 複数方向・複数速度・複数軌道のポリゴンを同時に飛ばす1ウェーブ。
+  // 全部斬れて初めて防御成功、1本でも自分のtravelMsに達すると被弾確定になる。
+  function spawnProjectileWave() {
+    waveTimersRef.current.forEach((timer) => clearTimeout(timer));
+    waveTimersRef.current.clear();
+    resolvedIdsRef.current.clear();
+    waveHadMissRef.current = false;
 
-    projectileTimerRef.current = setTimeout(() => {
-      if (enemyTurnResolvedRef.current) return;
-      enemyTurnResolvedRef.current = true;
-      setProjectile(null);
-      finishEnemyTurn(false);
-    }, PROJECTILE_TRAVEL_MS);
+    const angles = pickWaveAngles(enemy.isBoss);
+    const startTime = performance.now();
+    const spawnPosition = spawnPositionFromEnemy(enemyPosition.current);
+    const instances: ProjectileInstance[] = angles.map((angleDeg) => {
+      projectileIdRef.current += 1;
+      return {
+        id: projectileIdRef.current,
+        spawnPosition: spawnPosition.clone(),
+        startTime,
+        travelMs: randomBetween(PROJECTILE_TRAVEL_MS_MIN, PROJECTILE_TRAVEL_MS_MAX),
+        curveAxis: curveAxisForAngle(angleDeg),
+      };
+    });
+
+    waveUnresolvedRef.current = instances.length;
+    setProjectiles(instances);
+
+    instances.forEach((instance) => {
+      const timer = setTimeout(() => {
+        resolveProjectile(instance.id, false);
+      }, instance.travelMs);
+      waveTimersRef.current.set(instance.id, timer);
+    });
   }
 
-  // ポリゴンを斬れた瞬間に呼ばれる(ProjectileVisualから)。
-  function handleProjectileSliced() {
-    if (enemyTurnResolvedRef.current) return;
-    enemyTurnResolvedRef.current = true;
-    if (projectileTimerRef.current) {
-      clearTimeout(projectileTimerRef.current);
-      projectileTimerRef.current = null;
+  // 1本の決着(斬れた/届いた)が付くたびに呼ばれる。ウェーブ全本が決着したら
+  // finishEnemyTurnを呼ぶ(1本でも被弾していれば防御失敗として扱う)。
+  function resolveProjectile(id: number, sliced: boolean) {
+    if (resolvedIdsRef.current.has(id)) return;
+    resolvedIdsRef.current.add(id);
+
+    const timer = waveTimersRef.current.get(id);
+    if (timer) {
+      clearTimeout(timer);
+      waveTimersRef.current.delete(id);
     }
-    setProjectile(null);
-    finishEnemyTurn(true);
+    setProjectiles((prev) => prev.filter((p) => p.id !== id));
+    if (!sliced) waveHadMissRef.current = true;
+
+    waveUnresolvedRef.current -= 1;
+    if (waveUnresolvedRef.current <= 0) {
+      finishEnemyTurn(!waveHadMissRef.current);
+    }
   }
 
   function finishEnemyTurn(defended: boolean) {
@@ -359,7 +462,7 @@ function VRGameLoop({
       attacksRemainingRef.current -= 1;
       const proceedToNext = () => {
         if (attacksRemainingRef.current > 0) {
-          spawnProjectile();
+          spawnProjectileWave();
           return;
         }
         setEnemy((prev) => ({ ...prev, requiredDirection: randomDirection() }));
@@ -440,16 +543,18 @@ function VRGameLoop({
     return () => clearTimeout(timer);
   }, [enemy.state]);
 
-  // 相手のターン開始: 敵が離れきるのを待ってからポリゴンを飛ばす。
+  // 相手のターン開始: 敵が離れきるのを待ってからポリゴンのウェーブを飛ばす。
   useEffect(() => {
     if (phase !== "enemyTurn") return;
     attacksRemainingRef.current = enemy.isBoss ? BOSS_ATTACKS_PER_TURN : 1;
     const timer = setTimeout(() => {
-      spawnProjectile();
+      spawnProjectileWave();
     }, ENEMY_RETREAT_MS);
+    const waveTimers = waveTimersRef.current;
     return () => {
       clearTimeout(timer);
-      if (projectileTimerRef.current) clearTimeout(projectileTimerRef.current);
+      waveTimers.forEach((t) => clearTimeout(t));
+      waveTimers.clear();
       if (cooldownTimerRef.current) clearTimeout(cooldownTimerRef.current);
     };
   }, [phase]);
@@ -460,11 +565,15 @@ function VRGameLoop({
 
   return (
     <>
+      <SpaceBackground />
       {enemy.isBoss ? (
         <>
-          <ambientLight intensity={0.25} color="#ff3344" />
-          <pointLight position={[2, 3, 2]} intensity={0.5} color="#ff3344" />
-          <pointLight position={[0, 0.4, -1.5]} intensity={2} color="#ff0000" />
+          {/* 赤系の雰囲気だけだと黒い鎧が背景に沈むため、正面からの白系キーライトと
+              背後からの青いリムライトで輪郭を浮かび上がらせつつ、不穏さは赤で残す */}
+          <ambientLight intensity={0.45} color="#8899ff" />
+          <pointLight position={[1.5, 2.5, 1.5]} intensity={1.4} color="#ffffff" />
+          <pointLight position={[-2, 1.5, 1]} intensity={0.7} color="#ff3344" />
+          <pointLight position={[0, 2, -4]} intensity={1.6} color="#4cc9f0" />
         </>
       ) : (
         <>
@@ -473,24 +582,23 @@ function VRGameLoop({
         </>
       )}
       <EnemyMesh enemy={enemy} phase={phase} />
-      {projectile && (
-        <ProjectileVisual
-          key={projectile.id}
-          spawnPosition={PROJECTILE_SPAWN_POSITION}
-          startTime={projectile.startTime}
-          onHit={handleProjectileSliced}
-        />
-      )}
-      {/* Phase 3でVRBattleHUDに置き換えるまでの仮表示 */}
-      <Text
-        position={[0, 2.4, -1]}
-        fontSize={0.15}
-        color={phase === "playerTurn" ? "#4cc9f0" : "#ff6666"}
-        anchorX="center"
-        anchorY="middle"
-      >
-        {`${phase === "playerTurn" ? "YOUR TURN" : projectile ? "INCOMING! SLICE IT!" : "ENEMY TURN"}  HP ${playerHp}/${PLAYER_MAX_HP}  COMBO ${combo.combo}`}
-      </Text>
+      {projectiles.map((instance) => (
+        <ProjectileVisual key={instance.id} instance={instance} onResolve={resolveProjectile} />
+      ))}
+      <VRBattleHUD
+        position={[HUD_ANCHOR_POSITION.x, HUD_ANCHOR_POSITION.y, HUD_ANCHOR_POSITION.z]}
+        rotationY={HUD_ROTATION_Y}
+        playerHp={playerHp}
+        playerMaxHp={PLAYER_MAX_HP}
+        enemyName={enemy.isBoss ? "DARTH VADER" : "ENEMY"}
+        enemyHp={enemy.hp}
+        enemyMaxHp={enemy.maxHp}
+        combo={combo.combo}
+        score={combo.score}
+        phase={phase}
+        incoming={projectiles.length > 0}
+        isBoss={enemy.isBoss}
+      />
     </>
   );
 }
@@ -514,7 +622,10 @@ export default function VRGameScene() {
       >
         VRを開始
       </button>
-      <Canvas camera={{ position: [0, 1.5, 2], fov: 75 }}>
+      {/* gl.alpha未指定(既定true)だとcanvasのアルファ値が透ける前提になり、Quest 3等の
+          パススルー対応ヘッドセットでは背景が不透明のはずのVRでも実際の部屋が透けて見えてしまう。
+          alpha:falseで描画バッファを常に不透明にし、MR的な表示になるのを防ぐ。 */}
+      <Canvas camera={{ position: [0, 1.5, 2], fov: 75 }} gl={{ alpha: false }}>
         <SaberTipContext.Provider value={saberTipRef}>
           <SaberBaseContext.Provider value={saberBaseRef}>
             <EnemyHitboxSizeContext.Provider value={enemyHitboxSizeRef}>
