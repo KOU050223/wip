@@ -31,7 +31,11 @@ func main() {
 
 	scoreRepository := repository.NewGormScoreRepository(db)
 	scoreUsecase := usecase.NewScoreUsecase(scoreRepository)
-	router := httpapi.NewRouter(scoreUsecase, config.AllowOrigins())
+	router := httpapi.NewRouter(
+		scoreUsecase,
+		config.AllowOrigins(),
+		database.Ping(db),
+	)
 
 	port := os.Getenv("PORT")
 	if port == "" {

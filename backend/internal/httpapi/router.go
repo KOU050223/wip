@@ -1,25 +1,35 @@
 package httpapi
 
 import (
+	"context"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/KOU050223/wip/backend/internal/config"
 	"github.com/KOU050223/wip/backend/internal/usecase"
 	"github.com/gin-gonic/gin"
 )
 
+// healthCheckTimeout は /health での DB 疎通確認に許す時間。
+// DB がハングしてもヘルスチェック自体が詰まらないようにする。
+const healthCheckTimeout = 2 * time.Second
+
+// PingFunc は DB への疎通を確認する。
+type PingFunc func(context.Context) error
+
 type Router struct {
 	scoreUsecase *usecase.ScoreUsecase
+	pingDatabase PingFunc
 }
 
-func NewRouter(scoreUsecase *usecase.ScoreUsecase, allowOrigins []string) *gin.Engine {
+func NewRouter(scoreUsecase *usecase.ScoreUsecase, allowOrigins []string, pingDatabase PingFunc) *gin.Engine {
 	gin.SetMode(gin.ReleaseMode)
 
 	router := gin.New()
 	router.Use(gin.Logger(), gin.Recovery(), config.CORSMiddleware(allowOrigins))
 
-	r := &Router{scoreUsecase: scoreUsecase}
+	r := &Router{scoreUsecase: scoreUsecase, pingDatabase: pingDatabase}
 	router.GET("/health", r.health)
 	router.POST("/api/scores", r.createScore)
 	router.GET("/api/rankings", r.rankings)
@@ -28,6 +38,14 @@ func NewRouter(scoreUsecase *usecase.ScoreUsecase, allowOrigins []string) *gin.E
 }
 
 func (r *Router) health(c *gin.Context) {
+	ctx, cancel := context.WithTimeout(c.Request.Context(), healthCheckTimeout)
+	defer cancel()
+
+	if err := r.pingDatabase(ctx); err != nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"status": "error", "database": "unreachable"})
+		return
+	}
+
 	c.JSON(http.StatusOK, gin.H{"status": "ok"})
 }
 
