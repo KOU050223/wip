@@ -2,7 +2,7 @@
 // 戦闘ロジックUI(HUD)のモック実装
 // 今はモックデータで表示のみ。後で実際のenemy.ts/combo.ts/score.tsの状態と接続する想定。
 
-import React from "react";
+import { useState } from "react";
 
 type BattleHUDProps = {
   hp?: number;

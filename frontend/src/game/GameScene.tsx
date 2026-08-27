@@ -8,7 +8,7 @@
 // - 方向は取得しないため、セーバーの当たり判定は固定位置の近接判定(案A)。
 // - 敵はまずは「静止したまま出現し、当たったら消える」だけの最小構成。
 
-import React, { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Canvas, useFrame } from "@react-three/fiber";
 import { Vector3 } from "three";
 
@@ -127,15 +127,13 @@ function GameLoop({
 }
 
 export default function GameScene() {
-  const [hudEnemies, setHudEnemies] = useState<Enemy[]>([]);
   const [hudCombo, setHudCombo] = useState<ComboState>(createInitialComboState());
 
   return (
     <div className="relative w-full h-full min-h-[500px]">
       <Canvas camera={{ position: [0, 1.5, 2], fov: 60 }}>
         <GameLoop
-          onStateChange={(enemies, combo) => {
-            setHudEnemies(enemies);
+          onStateChange={(_enemies, combo) => {
             setHudCombo(combo);
           }}
         />
