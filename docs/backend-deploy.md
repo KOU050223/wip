@@ -39,11 +39,21 @@ Hyperdrive が効くのは「Worker 内で JS のドライバから直接クエ�
 
 | 種類 | トリガー | コマンド | 公開先 |
 | --- | --- | --- | --- |
-| プレビュー | `backend/**` を変更した Pull Request | `wrangler versions upload` | [Preview URL](https://developers.cloudflare.com/workers/versions-and-deployments/preview-urls/)（`https://<バージョン>-wip-backend.uozumi05.workers.dev`） |
 | 本番 | `main` への push | `wrangler deploy` | https://wip-backend.uozumi05.workers.dev |
 
-`versions upload` は新しいバージョンをアップロードするだけで、本番トラフィックの向き先は変更しない。
-プレビューURLは PR に自動でコメントされる。
+### プレビューデプロイが無い理由
+
+フロントエンドと違い、PR でのプレビューデプロイは用意していない。
+[Cloudflare のドキュメント](https://developers.cloudflare.com/containers/deploy/)に次のとおり明記されている。
+
+- **Preview URL は Durable Object を持つ Worker には発行されない**。Containers Worker は
+  コンテナを Durable Object で制御するため、これに該当する。
+- `wrangler versions upload` は Worker のバージョンを上げるだけで、
+  **コンテナイメージの publish もインスタンスのロールアウトも行わない**。
+
+つまり `versions upload` を回しても、新しいコンテナを動かして確認する手段が無い。
+PR の段階でコンテナの動作を確認したい場合は、後述の
+[ローカルで本番構成を再現する](#ローカルで本番構成を再現する)を使う。
 
 ## 事前に必要な設定
 
@@ -57,7 +67,7 @@ Containers は **Workers Paid プラン（月$5〜）** が必要。Free プラ�
 
 | 名前 | 内容 |
 | --- | --- |
-| `CLOUDFLARE_API_TOKEN` | Cloudflare の API トークン。**Workers Scripts: Edit** に加え、コンテナイメージを push するため **Containers: Edit** が必要 |
+| `CLOUDFLARE_API_TOKEN` | Cloudflare の API トークン。権限は **Workers Scripts: Edit**。コンテナイメージの push もこの権限で行われる（Containers 専用の権限区分は無い） |
 | `CLOUDFLARE_ACCOUNT_ID` | Cloudflare のアカウントID |
 
 ### Cloudflare 側のシークレット
@@ -75,7 +85,9 @@ npx wrangler secret put DATABASE_URL
 
 > [!IMPORTANT]
 > 本番用のマネージドPostgres自体はまだ用意していない（Issue #28）。
-> `DATABASE_URL` を登録するまで、デプロイしたAPIの `/health` は 503 を返す。
+> `DATABASE_URL` を登録するまでコンテナは起動に失敗し続ける（後述の
+> [設定不備がクラッシュループになる](#設定不備がクラッシュループになる)）。
+> `/health` が 503 を返すのではなく、そもそもAPIが応答しない点に注意する。
 
 非機密の `CORS_ALLOW_ORIGINS` は `backend/wrangler.jsonc` の `vars` に直接書いている。
 フロントエンドのオリジンを変える場合はここを編集する。
@@ -95,8 +107,7 @@ VITE_API_BASE_URL=https://wip-backend.uozumi05.workers.dev
 ## ローカルからのデプロイ
 
 ```bash
-task deploy:backend          # 本番へデプロイ
-task deploy:backend:preview  # プレビュー版をアップロード
+task deploy:backend  # 本番へデプロイ
 ```
 
 初回は `npx wrangler login` で Cloudflare にログインしておく。
@@ -118,9 +129,32 @@ task deploy:backend:preview  # プレビュー版をアップロード
 `sleepAfter` の時間だけリクエストが無いとコンテナは停止する。停止中は課金されないが、
 次のリクエストはコールドスタート（Goの起動 + Postgresへの TCP/TLS ハンドシェイク）を待つ。
 
-## ローカルでコンテナを検証する
+## ローカルで本番構成を再現する
 
-`wrangler deploy` を通さずに、イメージ単体の動作を確認できる。
+`wrangler dev` を使うと、Worker とコンテナを繋いだ**本番と同じ構成**をローカルで起動できる。
+コンテナイメージのビルドから DO バインディング、`getRandom` による分散まで一通り動く。
+
+```bash
+task db:up                  # ローカルPostgresを起動
+task dev:backend:container  # Worker＋コンテナを起動（初回はイメージのビルドで数分かかる）
+
+curl http://localhost:8787/health
+```
+
+`DATABASE_URL` は `backend/.dev.vars` から読まれる。本番の Worker Secret に相当するもので、
+コミットされない（`.gitignore` 済み）。手元に無い場合は次の内容で作る。
+
+```bash
+# backend/.dev.vars
+DATABASE_URL="postgres://wip:wip_password@host.docker.internal:5432/wip?sslmode=disable"
+```
+
+コンテナからホストの Postgres を見るため、ホスト名は `localhost` ではなく
+`host.docker.internal` になる点に注意する。
+
+## コンテナイメージ単体を検証する
+
+Worker を通さずイメージだけを確認したい場合。
 
 ```bash
 task db:up   # ローカルPostgresを起動
@@ -156,5 +190,8 @@ MVP はテーブルが `scores` ひとつだけで `AutoMigrate` は冪等に働
 
 `main.go` は `DATABASE_URL` が未設定だと `log.Fatal` で終了する。
 このときHTTPエラーは返らず、コンテナが起動しては落ちるだけになる。
+HTTPレベルでは Worker がコンテナへ接続できないエラーとして現れるため、
+`/health` の 503（DBには到達できるが疎通に失敗した状態）とは別物であることに注意する。
+
 原因は Cloudflare ダッシュボードの Workers > wip-backend > Logs、
 または `npx wrangler tail` で確認する。

@@ -1,10 +1,6 @@
 name: Deploy Backend
 
 on:
-  pull_request:
-    paths:
-      - 'backend/**'
-      - '.github/workflows/deploy-backend.yml'
   push:
     branches:
       - main
@@ -12,70 +8,19 @@ on:
       - 'backend/**'
       - '.github/workflows/deploy-backend.yml'
 
-# 同一ブランチへの連続プッシュでイメージのビルド・アップロードが競合しないよう直列化する。
+# 同一ブランチへの連続プッシュでイメージのビルド・ロールアウトが競合しないよう直列化する。
+# 本番デプロイの中断は避けたいのでキャンセルはしない。
 concurrency:
   group: deploy-backend-${{ github.ref }}
-  # 本番デプロイの中断は避けたいので、PRのプレビューのみキャンセル対象にする。
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  cancel-in-progress: false
 
+# フロントエンドと違い、PRでのプレビューデプロイは用意していない。
+# Containers Worker は Durable Object を持つため Preview URL が発行されず、
+# `wrangler versions upload` はコンテナイメージの publish もロールアウトも行わないため。
+# https://developers.cloudflare.com/containers/deploy/
 jobs:
-  preview:
-    name: Preview deploy
-    if: github.event_name == 'pull_request'
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      # プレビューURLをPRにコメントするために必要。
-      pull-requests: write
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 24
-          cache: npm
-          cache-dependency-path: backend/package-lock.json
-      - run: npm ci
-        working-directory: backend
-
-      # versions upload は新しいバージョンをアップロードするだけで、
-      # 本番トラフィックの向き先は変更しない。
-      # コンテナイメージのビルドには Docker が必要だが、ubuntu-latest には同梱されている。
-      - name: Upload preview version
-        id: upload
-        uses: cloudflare/wrangler-action@9acf94ace14e7dc412b076f2c5c20b8ce93c79cd # v3.15.0
-        with:
-          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          workingDirectory: backend
-          # backend/package.json の devDependencies と揃える。
-          wranglerVersion: '4.126.0'
-          command: versions upload
-
-      # 同じPRに何度もコメントが積まれないよう、既存コメントがあれば編集する。
-      - name: Comment preview URL
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-          PREVIEW_URL: ${{ steps.upload.outputs.deployment-url }}
-          COMMIT_SHA: ${{ github.event.pull_request.head.sha }}
-        run: |
-          marker='<!-- backend-preview -->'
-          body=$(printf '%s\n### 🛠 バックエンド プレビュー\n\n| | |\n| --- | --- |\n| **Preview URL** | %s |\n| **Commit** | %s |\n' \
-            "$marker" "$PREVIEW_URL" "$COMMIT_SHA")
-
-          comment_id=$(gh api --paginate "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" \
-            | jq -rs --arg marker "$marker" \
-              'add | map(select(.body | startswith($marker))) | .[0].id // empty')
-
-          if [ -n "$comment_id" ]; then
-            gh api --method PATCH "repos/$GITHUB_REPOSITORY/issues/comments/$comment_id" -f body="$body"
-          else
-            gh api --method POST "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" -f body="$body"
-          fi
-
   deploy:
     name: Production deploy
-    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -89,6 +34,7 @@ jobs:
       - run: npm ci
         working-directory: backend
 
+      # コンテナイメージのビルドには Docker が必要だが、ubuntu-latest には同梱されている。
       - name: Deploy to production
         id: deploy
         uses: cloudflare/wrangler-action@9acf94ace14e7dc412b076f2c5c20b8ce93c79cd # v3.15.0

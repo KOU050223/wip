@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "deploy": "wrangler deploy",
-    "deploy:preview": "wrangler versions upload",
+    "dev": "wrangler dev",
     "typecheck": "tsc --noEmit",
     "cf-typegen": "wrangler types"
   },

@@ -67,11 +67,11 @@ tasks:
     cmds:
       - npm run deploy
 
-  deploy:backend:preview:
-    desc: バックエンドのプレビュー版をアップロード（本番トラフィックは変更しない）
+  dev:backend:container:
+    desc: Worker＋コンテナをローカルで起動して本番構成を再現（Docker起動が必要）
     dir: backend
     cmds:
-      - npm run deploy:preview
+      - npm run dev
 
   ci:
     desc: GitHub Actions と同じ品質チェックを実行
