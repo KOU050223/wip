@@ -61,11 +61,24 @@ tasks:
     cmds:
       - npm run deploy:preview
 
+  deploy:backend:
+    desc: バックエンドをCloudflare Containersの本番へデプロイ（Docker起動が必要）
+    dir: backend
+    cmds:
+      - npm run deploy
+
+  dev:backend:container:
+    desc: Worker＋コンテナをローカルで起動して本番構成を再現（Docker起動が必要）
+    dir: backend
+    cmds:
+      - npm run dev
+
   ci:
     desc: GitHub Actions と同じ品質チェックを実行
     deps:
       - ci:frontend
       - ci:backend
+      - ci:backend:worker
 
   ci:frontend:
     internal: true
@@ -84,3 +97,12 @@ tasks:
       - test -z "$(gofmt -l .)"
       - go vet ./...
       - go test ./...
+
+  ci:backend:worker:
+    internal: true
+    dir: backend
+    cmds:
+      - npm ci
+      # worker-configuration.d.ts はコミットしないため、型検査の前に生成する。
+      - npx wrangler types
+      - npm run typecheck

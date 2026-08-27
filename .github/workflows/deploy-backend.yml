@@ -1,0 +1,50 @@
+name: Deploy Backend
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'backend/**'
+      - '.github/workflows/deploy-backend.yml'
+
+# 同一ブランチへの連続プッシュでイメージのビルド・ロールアウトが競合しないよう直列化する。
+# 本番デプロイの中断は避けたいのでキャンセルはしない。
+concurrency:
+  group: deploy-backend-${{ github.ref }}
+  cancel-in-progress: false
+
+# フロントエンドと違い、PRでのプレビューデプロイは用意していない。
+# Containers Worker は Durable Object を持つため Preview URL が発行されず、
+# `wrangler versions upload` はコンテナイメージの publish もロールアウトも行わないため。
+# https://developers.cloudflare.com/containers/deploy/
+jobs:
+  deploy:
+    name: Production deploy
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - run: npm ci
+        working-directory: backend
+
+      # コンテナイメージのビルドには Docker が必要だが、ubuntu-latest には同梱されている。
+      - name: Deploy to production
+        id: deploy
+        uses: cloudflare/wrangler-action@9acf94ace14e7dc412b076f2c5c20b8ce93c79cd # v3.15.0
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: backend
+          # backend/package.json の devDependencies と揃える。
+          wranglerVersion: '4.126.0'
+          command: deploy
+
+      - name: Show deployment URL
+        run: echo "本番URL ${{ steps.deploy.outputs.deployment-url }}" >> "$GITHUB_STEP_SUMMARY"
