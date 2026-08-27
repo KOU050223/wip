@@ -2,9 +2,15 @@
 // 敵出現ロジック
 
 import { Vector3 } from "three";
-import type { Enemy } from "./types";
+import type { Enemy, SwingDirection } from "./types";
 
 let enemyIdCounter = 0;
+
+const SWING_DIRECTIONS: SwingDirection[] = ["up", "down", "left", "right"];
+
+function randomDirection(): SwingDirection {
+  return SWING_DIRECTIONS[Math.floor(Math.random() * SWING_DIRECTIONS.length)];
+}
 
 /**
  * 敵を1体生成する。最初はスポーン位置を固定/ランダム範囲から選ぶだけのシンプル実装。
@@ -28,6 +34,7 @@ export function spawnEnemy(
     baseX: position.x,
     feintPhase: Math.random() * Math.PI * 2,
     feintFrequency: 1.5 + Math.random() * 1.5,
+    requiredDirection: randomDirection(),
   };
 }
 

@@ -3,16 +3,17 @@
 //
 // 前提:
 // - Joy-Conの接続状態・センサー値はJoyConContext(useJoyConContext)から取得する。
-// - スイング検出(useSwingDetection)が加速度から swingId/swingPower を算出する。
-// - 方向は取得しないため、セーバーの当たり判定は固定位置の近接判定(案A)。
-// - 敵はまずは「静止したまま出現し、当たったら消える」だけの最小構成。
+// - スイング検出(useSwingDetection)が加速度から swingId/swingPower/swingDirection を算出する。
+// - セーバーの当たり判定位置は固定(近接判定)だが、命中には敵ごとの指定方向とのマッチが必要。
+// - 敵は奥から近づいてきて、指定方向に振らないと倒せない。
 
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
+import { Text } from "@react-three/drei";
 import { Vector3 } from "three";
 
-import type { Enemy, ComboState } from "./types";
+import type { Enemy, ComboState, SwingDirection } from "./types";
 import { spawnEnemy, createSpawnTimer, randomSpawnPosition } from "./enemySpawn";
 import { checkHit, calculateDamage } from "./attackDetection";
 import { applyDamage, finalizeDeath, isDead } from "./hp";
@@ -50,15 +51,35 @@ function CameraLookAt({ target }: { target: Vector3 }) {
   return null;
 }
 
+const DIRECTION_ARROWS: Record<SwingDirection, string> = {
+  up: "↑",
+  down: "↓",
+  left: "←",
+  right: "→",
+};
+
 function EnemyMesh({ enemy }: { enemy: Enemy }) {
   const opacity = enemy.state === "dying" ? 0.3 : 1;
   const color = enemy.state === "hit" ? "#ff6b6b" : "#8855ff";
 
   return (
-    <mesh position={enemy.position}>
-      <boxGeometry args={[0.8, 1.6, 0.8]} />
-      <meshStandardMaterial color={color} transparent opacity={opacity} />
-    </mesh>
+    <group position={enemy.position}>
+      <mesh>
+        <boxGeometry args={[0.8, 1.6, 0.8]} />
+        <meshStandardMaterial color={color} transparent opacity={opacity} />
+      </mesh>
+      {enemy.state === "idle" && (
+        <Text
+          position={[0, 0.3, 0.41]}
+          fontSize={0.6}
+          color="#ffe066"
+          anchorX="center"
+          anchorY="middle"
+        >
+          {DIRECTION_ARROWS[enemy.requiredDirection]}
+        </Text>
+      )}
+    </group>
   );
 }
 
@@ -166,6 +187,8 @@ function GameLoop({
 
     const hitEnemy = checkHit(SABER_TIP_POSITION, swing.swingPower, enemies);
     if (!hitEnemy) return;
+    // 指定された方向と振った方向が一致しないと不発(ダメージなし)
+    if (swing.swingDirection !== hitEnemy.requiredDirection) return;
 
     const damage = calculateDamage(swing.swingPower);
     const now = performance.now();
@@ -175,7 +198,7 @@ function GameLoop({
       const next = registerHit(prev, now);
       return { ...next, score: addScore(prev.score, next.combo) };
     });
-  }, [swing.swingId, swing.swingPower, isJoyConConnected, enemies]);
+  }, [swing.swingId, swing.swingPower, swing.swingDirection, isJoyConConnected, enemies]);
 
   useEffect(() => {
     onStateChange(enemies, combo, playerHp, timeRemaining);

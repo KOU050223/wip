@@ -5,6 +5,9 @@ import { Vector3 } from "three";
 
 export type EnemyState = "idle" | "hit" | "dying" | "dead";
 
+// 敵を切るべき方向、およびJoy-Conを振った方向の分類に使う共通の型
+export type SwingDirection = "up" | "down" | "left" | "right";
+
 export type Enemy = {
   id: string;
   position: Vector3;
@@ -17,6 +20,7 @@ export type Enemy = {
   baseX: number; // フェイント(左右の揺さぶり)の中心となるx座標
   feintPhase: number; // フェイントの位相(個体ごとにばらけさせる)
   feintFrequency: number; // フェイントの周期の速さ(個体ごとにばらけさせる)
+  requiredDirection: SwingDirection; // この方向に振らないとダメージが入らない
 };
 
 export type GameEvent =
