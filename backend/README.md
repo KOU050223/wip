@@ -111,13 +111,13 @@ go run ./cmd/server
 `.env` を使わず、環境変数を直接指定して起動することもできる。
 
 ```bash
-DATABASE_URL="postgres://user:password@localhost:5432/game?sslmode=disable" go run ./cmd/server
+DATABASE_URL="postgres://wip:wip_password@localhost:5432/wip?sslmode=disable" go run ./cmd/server
 ```
 
 PowerShellの場合は以下のように指定する。
 
 ```powershell
-$env:DATABASE_URL = "postgres://user:password@localhost:5432/game?sslmode=disable"
+$env:DATABASE_URL = "postgres://wip:wip_password@localhost:5432/wip?sslmode=disable"
 go run ./cmd/server
 ```
 
