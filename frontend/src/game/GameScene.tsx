@@ -25,6 +25,7 @@ import { createInitialComboState, registerHit, resetCombo } from "./combo";
 import { addScore } from "./score";
 import BattleHUD from "./BattleHUD";
 import Lightsaber from "../components/three/Lightsaber";
+import Splatter from "../components/three/Splatter";
 import { useJoyConContext } from "../contexts/JoyConContext";
 import { useSwingDetection } from "../hooks/useSwingDetection";
 import { useButtonPress, randomDefenseButton } from "../hooks/useButtonPress";
@@ -44,7 +45,8 @@ const PLAYER_ATTACK_DAMAGE = 250; // 自分の攻撃1回のダメージ(2回で�
 const ENEMY_ATTACK_DAMAGE = 100; // 相手の攻撃1回で受けるダメージ(防御失敗時、ボスも同じ値)
 const DEFENSE_WINDOW_MS = 800; // 防御コマンドの入力受付時間
 const HIT_RECOVER_MS = 200; // 被弾演出(赤フラッシュ)の表示時間
-const DYING_DURATION_MS = 300; // 撃破演出の表示時間
+
+const DYING_DURATION_MS = 800; // 撃破演出の表示時間(スプラッターが消えるまで見えるようSplatterの演出時間と揃えている)
 const TURN_COOLDOWN_MS = 300; // 防御コマンド確定後、次の判定(ボスの連続攻撃・自分のターン開始)までの間合い
 
 // ボス(ダースベーダー)関連
@@ -90,6 +92,13 @@ const MODEL_FACING_OFFSET: Record<string, number> = {
   "/models/DV.glb": Math.PI,
 };
 
+// 高さをMODEL_TARGET_HEIGHTに揃えるだけだと、モデルによっては
+// (gamema.glbなど)横幅・奥行きが目立って画面上で大きく見えすぎるため、
+// 個別に追加の縮小率をかけて調整する。
+const MODEL_SCALE_OFFSET: Record<string, number> = {
+  "/models/gamema.glb": 0.7,
+};
+
 // 敵モデル本体。同じモデルを複数体で使い回してもボーン等が衝突しないよう、
 // ロード済みシーンをそのまま使わずSkeletonUtils.cloneで複製してから表示する。
 function EnemyModel({ modelPath, state }: { modelPath: string; state: Enemy["state"] }) {
@@ -110,7 +119,8 @@ function EnemyModel({ modelPath, state }: { modelPath: string; state: Enemy["sta
     const box = new Box3().setFromObject(cloned);
     const size = box.getSize(new Vector3());
     const center = box.getCenter(new Vector3());
-    const scale = size.y > 0 ? MODEL_TARGET_HEIGHT / size.y : 1;
+    const scale =
+      (size.y > 0 ? MODEL_TARGET_HEIGHT / size.y : 1) * (MODEL_SCALE_OFFSET[modelPath] ?? 1);
     cloned.scale.setScalar(scale);
     cloned.position.set(-center.x * scale, -box.min.y * scale, -center.z * scale);
     cloned.rotation.y = MODEL_FACING_OFFSET[modelPath] ?? 0;
@@ -191,9 +201,13 @@ function GameLoop({
   const [combo, setCombo] = useState<ComboState>(createInitialComboState());
   const [playerHp, setPlayerHp] = useState(PLAYER_MAX_HP);
   const [defenseButton, setDefenseButton] = useState<DefenseButton>(randomDefenseButton);
+  const [splatters, setSplatters] = useState<{ id: string; position: [number, number, number] }[]>(
+    [],
+  );
   const lastSwingIdRef = useRef(0);
   const lastSwingSfxIdRef = useRef(0);
   const gameOverFiredRef = useRef(false);
+  const splatterSpawnedForRef = useRef<string | null>(null);
   const swing = useSwingDetection(joyConState);
   const buttonPress = useButtonPress(joyConState);
 
@@ -371,6 +385,23 @@ function GameLoop({
     return () => clearTimeout(timer);
   }, [enemy.state]);
 
+  // 撃破の瞬間(dyingに遷移した瞬間)に1度だけスプラッター演出を発生させる
+  useEffect(() => {
+    if (enemy.state !== "dying") return;
+    if (splatterSpawnedForRef.current === enemy.id) return;
+    splatterSpawnedForRef.current = enemy.id;
+
+    const splatterId = `${enemy.id}-splatter`;
+    setSplatters((prev) => [
+      ...prev,
+      { id: splatterId, position: [enemy.position.x, enemy.position.y, enemy.position.z] },
+    ]);
+  }, [enemy.state, enemy.id, enemy.position]);
+
+  // 相手のターン開始: 防御ボタンを決め、DEFENSE_WINDOW_MS以内に入力がなければ防御失敗とする。
+  // phaseのみに依存させている(buttonPress.pressIdは意図的に含めていない)。
+  // 含めてしまうと、下の入力監視effectが解決するのと同時にこのeffectも「新たに突入した」と
+  // 誤認して防御ボタン・受付時間をリセットしてしまい、判定が正しく確定しなくなる。
   // 相手のターン開始: 攻撃回数(通常敵1回・ボス2回)を決めて防御コマンドを開始する。
   useEffect(() => {
     if (phase !== "enemyTurn") return;
@@ -420,6 +451,13 @@ function GameLoop({
         position={[SABER_HIT_POSITION.x, SABER_HIT_POSITION.y, SABER_HIT_POSITION.z]}
       />
       <EnemyMesh enemy={enemy} />
+      {splatters.map((s) => (
+        <Splatter
+          key={s.id}
+          position={s.position}
+          onComplete={() => setSplatters((prev) => prev.filter((p) => p.id !== s.id))}
+        />
+      ))}
     </>
   );
 }
