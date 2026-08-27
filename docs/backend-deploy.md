@@ -39,7 +39,7 @@ Hyperdrive が効くのは「Worker 内で JS のドライバから直接クエ�
 
 | 種類 | トリガー | コマンド | 公開先 |
 | --- | --- | --- | --- |
-| 本番 | `main` への push | `wrangler deploy` | https://wip-backend.uozumi05.workers.dev |
+| 本番 | `main` への push | `wrangler deploy` | `https://wip-backend.uozumi05.workers.dev`（想定。初回デプロイ後に確定する） |
 
 ### プレビューデプロイが無い理由
 
@@ -141,16 +141,21 @@ task dev:backend:container  # Worker＋コンテナを起動（初回はイメ�
 curl http://localhost:8787/health
 ```
 
-`DATABASE_URL` は `backend/.dev.vars` から読まれる。本番の Worker Secret に相当するもので、
-コミットされない（`.gitignore` 済み）。手元に無い場合は次の内容で作る。
+ローカル用の設定は `backend/.dev.vars` から読まれる。コミットされない（`.gitignore` 済み）ので、
+手元に無い場合は次の内容で作る。
 
 ```bash
 # backend/.dev.vars
 DATABASE_URL="postgres://wip:wip_password@host.docker.internal:5432/wip?sslmode=disable"
+CORS_ALLOW_ORIGINS="http://localhost:3000,http://localhost:5173"
 ```
 
-コンテナからホストの Postgres を見るため、ホスト名は `localhost` ではなく
-`host.docker.internal` になる点に注意する。
+2点とも `wrangler.jsonc` の設定を上書きするために必要になる。
+
+- `DATABASE_URL` は本番の Worker Secret に相当する。コンテナからホストの Postgres を見るため、
+  ホスト名は `localhost` ではなく `host.docker.internal` を使う。
+- `CORS_ALLOW_ORIGINS` は `wrangler.jsonc` の `vars` が**本番オリジンのみ**を指しているため、
+  上書きしないとローカルの Vite（`localhost:5173`）からのリクエストが 403 になる。
 
 ## コンテナイメージ単体を検証する
 
@@ -172,6 +177,21 @@ curl -i http://localhost:18099/health
 ホスト側のポートは空いていれば何でもよい。コンテナ側は `8080` 固定
 （`Dockerfile` の `EXPOSE` と `worker/index.ts` の `defaultPort` を揃えてある）。
 
+## 残作業
+
+デプロイの仕組みは用意したが、**まだ一度もデプロイしていない**。
+本番を動かすには以下を順に進める。各手順が次の手順の前提になっている。
+
+1. **マネージドPostgresを用意する**（Issue #28）。接続文字列を入手する。
+2. **`DATABASE_URL` を登録する**。`cd backend && npx wrangler secret put DATABASE_URL`。
+   これを先に済ませないと、デプロイしても起動しないAPIが公開されるだけになる。
+3. **バックエンドをデプロイする**。`main` への push で自動実行される（`task deploy:backend` でも可）。
+   デプロイ後に確定した本番URLで `/health` が 200 を返すことを確認する。
+4. **`VITE_API_BASE_URL` を切り替える**。現在は `http://localhost:8080` のままなので、
+   3 で確定したURLに更新する（[フロントエンドの接続先を切り替える](#フロントエンドの接続先を切り替える)）。
+5. **フロントエンドを再デプロイする**。`VITE_API_BASE_URL` はビルド時に埋め込まれるため、
+   変数を変えるだけでは反映されない。
+
 ## 既知の課題
 
 ### 起動時マイグレーションがコールドスタートのたびに走る
@@ -189,7 +209,9 @@ MVP はテーブルが `scores` ひとつだけで `AutoMigrate` は冪等に働
 ### 設定不備がクラッシュループになる
 
 `main.go` は `DATABASE_URL` が未設定だと `log.Fatal` で終了する。
-このときHTTPエラーは返らず、コンテナが起動しては落ちるだけになる。
+このときHTTPエラーは返らず、コンテナが起動しては落ちるだけになると考えられる
+（未デプロイのため未検証。コンテナ起動の時点で失敗する可能性もあるが、
+いずれにせよAPIが応答しない状態になる）。
 HTTPレベルでは Worker がコンテナへ接続できないエラーとして現れるため、
 `/health` の 503（DBには到達できるが疎通に失敗した状態）とは別物であることに注意する。
 
