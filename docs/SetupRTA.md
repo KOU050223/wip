@@ -79,6 +79,31 @@ npm --version
 
 Homebrewがない場合は、[Node.js公式ダウンロードページ](https://nodejs.org/en/download)からNode.js 24 LTSを導入する。
 
+## Docker
+
+ローカル開発用の PostgreSQL は docker compose で起動する。Docker Desktop を導入する。
+
+### Windows
+
+```powershell
+winget install Docker.DockerDesktop
+```
+
+### macOS
+
+```bash
+brew install --cask docker
+```
+
+Homebrewがない場合は、[Docker Desktop公式ダウンロードページ](https://www.docker.com/products/docker-desktop/)から導入する。
+
+導入後、Docker Desktop を一度起動してから確認する。
+
+```bash
+docker --version
+docker compose version
+```
+
 ## プロジェクトを起動する前の確認
 
 任意の作業フォルダで、リポジトリをcloneする。
@@ -94,6 +119,7 @@ cd wip
 go version
 node --version
 npm --version
+docker compose version
 ```
 
-その後、プロジェクトに用意されているREADMEに従って依存関係をインストールし、開発サーバーを起動する。Joy-Conを使う機能は、Bluetoothで接続したうえでChromeまたはEdgeから確認する。
+その後、リポジトリルートの [README](../README.md) の「ローカル起動」に従って `.env` を用意し、`task dev` で開発サーバーを起動する。Joy-Conを使う機能は、Bluetoothで接続したうえでChromeまたはEdgeから確認する。

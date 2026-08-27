@@ -84,16 +84,40 @@ go mod tidy
 go test ./...
 ```
 
-PostgreSQLの接続先を指定してサーバーを起動する。
+## 環境変数
+
+| 変数名 | 必須 | デフォルト | 説明 |
+| --- | --- | --- | --- |
+| `DATABASE_URL` | 必須 | なし | PostgreSQLの接続先。未設定の場合は起動時に終了する。 |
+| `PORT` | 任意 | `8080` | HTTPサーバーの待ち受けポート。 |
+| `CORS_ALLOW_ORIGINS` | 任意 | `http://localhost:3000,http://localhost:5173` | CORSで許可するオリジン。カンマ区切りで複数指定できる。`*` を指定するとすべてのオリジンを許可する。 |
+
+`.env.example` をコピーして `.env` を作ると、値をシェルに書かずに開発できる。
 
 ```bash
-DATABASE_URL="postgres://user:password@localhost:5432/game?sslmode=disable" go run ./cmd/server
+cp .env.example .env
+```
+
+`.env` はプロセスのカレントディレクトリから読み込むため、`backend/` ディレクトリでコマンドを実行する。
+また `.env` は既存の環境変数を **上書きしない** ため、シェルやdirenv（リポジトリルートの `.envrc`）で設定済みの値のほうが優先される。
+`.env` はコミットしない（`.gitignore` 済み）。
+
+サーバーを起動する。
+
+```bash
+go run ./cmd/server
+```
+
+`.env` を使わず、環境変数を直接指定して起動することもできる。
+
+```bash
+DATABASE_URL="postgres://wip:wip_password@localhost:5432/wip?sslmode=disable" go run ./cmd/server
 ```
 
 PowerShellの場合は以下のように指定する。
 
 ```powershell
-$env:DATABASE_URL = "postgres://user:password@localhost:5432/game?sslmode=disable"
+$env:DATABASE_URL = "postgres://wip:wip_password@localhost:5432/wip?sslmode=disable"
 go run ./cmd/server
 ```
 
