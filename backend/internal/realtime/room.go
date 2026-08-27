@@ -32,12 +32,48 @@ func (r *RedisRoom) CanJoin(ctx context.Context, matchID, playerID string) (bool
 	return false, nil
 }
 
-func (r *RedisRoom) SetPresence(ctx context.Context, matchID, playerID string) error {
-	return r.client.Set(ctx, "match:"+matchID+":presence:"+playerID, "online", presenceLifetime).Err()
+func (r *RedisRoom) SetPresence(ctx context.Context, matchID, playerID, leaseID string) error {
+	return r.client.Set(ctx, "match:"+matchID+":presence:"+playerID, leaseID, presenceLifetime).Err()
 }
 
-func (r *RedisRoom) ClearPresence(ctx context.Context, matchID, playerID string) error {
-	return r.client.Del(ctx, "match:"+matchID+":presence:"+playerID).Err()
+func (r *RedisRoom) RefreshPresence(ctx context.Context, matchID, playerID, leaseID string) (bool, error) {
+	refreshed, err := r.client.Eval(ctx, `
+if redis.call('GET', KEYS[1]) == ARGV[1] then
+  return redis.call('PEXPIRE', KEYS[1], ARGV[2])
+end
+return 0
+`, []string{"match:" + matchID + ":presence:" + playerID}, leaseID, presenceLifetime.Milliseconds()).Int()
+	return refreshed == 1, err
+}
+
+func (r *RedisRoom) ClearPresence(ctx context.Context, matchID, playerID, leaseID string) (bool, error) {
+	deleted, err := r.client.Eval(ctx, `
+if redis.call('GET', KEYS[1]) == ARGV[1] then
+  return redis.call('DEL', KEYS[1])
+end
+return 0
+`, []string{"match:" + matchID + ":presence:" + playerID}, leaseID).Int()
+	return deleted == 1, err
+}
+
+func (r *RedisRoom) OpponentPresent(ctx context.Context, matchID, playerID string) (bool, error) {
+	players, err := r.client.HMGet(ctx, "match:"+matchID, "player:1", "player:2").Result()
+	if err != nil {
+		return false, err
+	}
+	var opponentID string
+	for _, player := range players {
+		candidate, ok := player.(string)
+		if ok && candidate != "" && candidate != playerID {
+			opponentID = candidate
+			break
+		}
+	}
+	if opponentID == "" {
+		return false, nil
+	}
+	exists, err := r.client.Exists(ctx, "match:"+matchID+":presence:"+opponentID).Result()
+	return exists == 1, err
 }
 
 func (r *RedisRoom) Publish(ctx context.Context, matchID string, event []byte) error {

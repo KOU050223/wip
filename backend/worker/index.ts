@@ -9,6 +9,7 @@ export class BackendContainer extends Container {
     DATABASE_URL: env.DATABASE_URL,
     CORS_ALLOW_ORIGINS: env.CORS_ALLOW_ORIGINS,
     UPSTASH_REDIS_URL: env.UPSTASH_REDIS_URL,
+    GUEST_SESSION_SECRET: env.GUEST_SESSION_SECRET,
   };
 
   override onStart() {

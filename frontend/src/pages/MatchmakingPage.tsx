@@ -2,7 +2,9 @@ import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import {
   matchmakingStatusLabel,
+  matchmakingRequestInit,
   resolveAPIBaseURL,
+  type MatchmakingMethod,
   type MatchmakingStatus,
 } from "../game/matchmaking";
 
@@ -13,8 +15,8 @@ type QueueResponse = {
   match_id?: string;
 };
 
-async function request(path: string, method: "GET" | "POST" | "DELETE") {
-  return fetch(`${apiBaseURL}${path}`, { method, credentials: "include" });
+async function request(path: string, method: MatchmakingMethod) {
+  return fetch(`${apiBaseURL}${path}`, matchmakingRequestInit(method));
 }
 
 function MatchmakingPage() {
@@ -25,6 +27,11 @@ function MatchmakingPage() {
 
   const refresh = useCallback(async () => {
     const response = await request("/api/matchmaking/queue", "GET");
+    if (response.status === 401) {
+      setStatus("idle");
+      setMatchID(undefined);
+      return;
+    }
     if (!response.ok) throw new Error("対戦状態を取得できませんでした");
     const queue = (await response.json()) as QueueResponse;
     setStatus(queue.status);
@@ -58,6 +65,10 @@ function MatchmakingPage() {
     setStatus("idle");
     setMatchID(undefined);
   }, []);
+
+  useEffect(() => {
+    void refresh().catch(() => setError("対戦状態を取得できませんでした"));
+  }, [refresh]);
 
   useEffect(() => {
     if (status !== "waiting") return;

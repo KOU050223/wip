@@ -241,6 +241,12 @@ func TestGuestSessionIssuesSignedCookieAndRejectsForgedPlayerID(t *testing.T) {
 	if len(cookies) != 1 || cookies[0].Name != "guest_session" {
 		t.Fatalf("cookies = %#v, want signed guest cookie", cookies)
 	}
+	if !cookies[0].Secure {
+		t.Fatal("guest cookie is not Secure")
+	}
+	if cookies[0].SameSite != http.SameSiteNoneMode {
+		t.Fatalf("guest cookie SameSite = %v, want %v", cookies[0].SameSite, http.SameSiteNoneMode)
+	}
 
 	forged := httptest.NewRecorder()
 	request := httptest.NewRequest(http.MethodPost, "/api/matchmaking/queue", nil)
@@ -264,6 +270,18 @@ func TestGuestSessionIssuesSignedCookieAndRejectsForgedPlayerID(t *testing.T) {
 	router.ServeHTTP(tampered, request)
 	if tampered.Code != http.StatusUnauthorized {
 		t.Fatalf("tampered cookie status = %d, want %d", tampered.Code, http.StatusUnauthorized)
+	}
+}
+
+func TestMatchmakingStatusDisablesCaching(t *testing.T) {
+	router := newMatchmakingTestRouter(&memoryQueue{})
+	response := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodGet, "/api/matchmaking/queue", nil)
+	request.AddCookie(guestCookie(t, router))
+	router.ServeHTTP(response, request)
+
+	if got := response.Header().Get("Cache-Control"); got != "no-store" {
+		t.Fatalf("Cache-Control = %q, want %q", got, "no-store")
 	}
 }
 
@@ -299,6 +317,174 @@ func TestRoomWebSocketRejectsPlayerOutsideMatch(t *testing.T) {
 	}
 	if response == nil || response.StatusCode != http.StatusForbidden {
 		t.Fatalf("WebSocket response = %#v, want 403", response)
+	}
+}
+
+func TestRoomWebSocketReportsWhetherOpponentIsPresent(t *testing.T) {
+	server := miniredis.RunT(t)
+	client := redis.NewClient(&redis.Options{Addr: server.Addr()})
+	t.Cleanup(func() { _ = client.Close() })
+	queue := realtime.NewRedisQueue(client)
+	if _, err := queue.Join(t.Context(), "alice"); err != nil {
+		t.Fatalf("alice Join returned error: %v", err)
+	}
+	match, err := queue.Join(t.Context(), "bob")
+	if err != nil {
+		t.Fatalf("bob Join returned error: %v", err)
+	}
+	room := realtime.NewRedisRoom(client)
+	if err := room.SetPresence(t.Context(), match.ID, "bob", "bob-lease"); err != nil {
+		t.Fatalf("SetPresence returned error: %v", err)
+	}
+	sessions := realtime.NewGuestSessions("test-secret")
+	router := NewRouterWithRealtimeAndRooms(
+		usecase.NewScoreUsecase(&memoryScoreRepository{}), testAllowOrigins,
+		func(context.Context) error { return nil }, realtime.NewMatchmakingService(queue), sessions, room,
+	)
+	httpServer := httptest.NewServer(router)
+	t.Cleanup(httpServer.Close)
+
+	wsURL := "ws" + strings.TrimPrefix(httpServer.URL, "http") + "/api/matches/" + match.ID + "/ws"
+	header := http.Header{}
+	header.Add("Cookie", (&http.Cookie{Name: realtime.GuestSessionCookieName, Value: sessions.Sign("alice", time.Now().Add(time.Hour))}).String())
+	connection, _, err := websocket.DefaultDialer.Dial(wsURL, header)
+	if err != nil {
+		t.Fatalf("Dial returned error: %v", err)
+	}
+	defer connection.Close()
+	if err := connection.SetReadDeadline(time.Now().Add(time.Second)); err != nil {
+		t.Fatalf("SetReadDeadline returned error: %v", err)
+	}
+	_, payload, err := connection.ReadMessage()
+	if err != nil {
+		t.Fatalf("ReadMessage returned error: %v", err)
+	}
+	if string(payload) != `{"type":"room.joined","opponent_connected":true}` {
+		t.Fatalf("payload = %s", payload)
+	}
+}
+
+func TestRoomWebSocketFirstPlayerReceivesOpponentConnectedEvent(t *testing.T) {
+	server := miniredis.RunT(t)
+	client := redis.NewClient(&redis.Options{Addr: server.Addr()})
+	t.Cleanup(func() { _ = client.Close() })
+	queue := realtime.NewRedisQueue(client)
+	if _, err := queue.Join(t.Context(), "alice"); err != nil {
+		t.Fatalf("alice Join returned error: %v", err)
+	}
+	match, err := queue.Join(t.Context(), "bob")
+	if err != nil {
+		t.Fatalf("bob Join returned error: %v", err)
+	}
+	sessions := realtime.NewGuestSessions("test-secret")
+	router := NewRouterWithRealtimeAndRooms(
+		usecase.NewScoreUsecase(&memoryScoreRepository{}), testAllowOrigins,
+		func(context.Context) error { return nil }, realtime.NewMatchmakingService(queue), sessions, realtime.NewRedisRoom(client),
+	)
+	httpServer := httptest.NewServer(router)
+	t.Cleanup(httpServer.Close)
+	wsURL := "ws" + strings.TrimPrefix(httpServer.URL, "http") + "/api/matches/" + match.ID + "/ws"
+
+	dial := func(playerID string) *websocket.Conn {
+		t.Helper()
+		header := http.Header{}
+		header.Add("Cookie", (&http.Cookie{Name: realtime.GuestSessionCookieName, Value: sessions.Sign(playerID, time.Now().Add(time.Hour))}).String())
+		connection, _, dialErr := websocket.DefaultDialer.Dial(wsURL, header)
+		if dialErr != nil {
+			t.Fatalf("Dial(%q) returned error: %v", playerID, dialErr)
+		}
+		return connection
+	}
+
+	alice := dial("alice")
+	defer alice.Close()
+	if _, _, err := alice.ReadMessage(); err != nil {
+		t.Fatalf("alice failed to read room.joined: %v", err)
+	}
+	bob := dial("bob")
+	defer bob.Close()
+	if _, _, err := bob.ReadMessage(); err != nil {
+		t.Fatalf("bob failed to read room.joined: %v", err)
+	}
+	if err := alice.SetReadDeadline(time.Now().Add(time.Second)); err != nil {
+		t.Fatalf("SetReadDeadline returned error: %v", err)
+	}
+	_, payload, err := alice.ReadMessage()
+	if err != nil {
+		t.Fatalf("alice did not receive opponent connection: %v", err)
+	}
+	var event struct {
+		Type     string `json:"type"`
+		PlayerID string `json:"player_id"`
+	}
+	if err := json.Unmarshal(payload, &event); err != nil {
+		t.Fatalf("failed to decode event: %v", err)
+	}
+	if event.Type != "player.connected" || event.PlayerID != "bob" {
+		t.Fatalf("event = %#v, want bob connected", event)
+	}
+}
+
+func TestRoomWebSocketRejectsOversizedMessages(t *testing.T) {
+	server := miniredis.RunT(t)
+	client := redis.NewClient(&redis.Options{Addr: server.Addr()})
+	t.Cleanup(func() { _ = client.Close() })
+	queue := realtime.NewRedisQueue(client)
+	if _, err := queue.Join(t.Context(), "alice"); err != nil {
+		t.Fatalf("alice Join returned error: %v", err)
+	}
+	match, err := queue.Join(t.Context(), "bob")
+	if err != nil {
+		t.Fatalf("bob Join returned error: %v", err)
+	}
+	sessions := realtime.NewGuestSessions("test-secret")
+	router := NewRouterWithRealtimeAndRooms(
+		usecase.NewScoreUsecase(&memoryScoreRepository{}), testAllowOrigins,
+		func(context.Context) error { return nil }, realtime.NewMatchmakingService(queue), sessions, realtime.NewRedisRoom(client),
+	)
+	httpServer := httptest.NewServer(router)
+	t.Cleanup(httpServer.Close)
+
+	wsURL := "ws" + strings.TrimPrefix(httpServer.URL, "http") + "/api/matches/" + match.ID + "/ws"
+	header := http.Header{}
+	header.Add("Cookie", (&http.Cookie{Name: realtime.GuestSessionCookieName, Value: sessions.Sign("alice", time.Now().Add(time.Hour))}).String())
+	connection, _, err := websocket.DefaultDialer.Dial(wsURL, header)
+	if err != nil {
+		t.Fatalf("Dial returned error: %v", err)
+	}
+	defer connection.Close()
+	if _, _, err := connection.ReadMessage(); err != nil {
+		t.Fatalf("failed to read room.joined: %v", err)
+	}
+	if err := connection.WriteMessage(websocket.TextMessage, []byte(strings.Repeat("x", websocketMessageLimit+1))); err != nil {
+		t.Fatalf("WriteMessage returned error: %v", err)
+	}
+	if err := connection.SetReadDeadline(time.Now().Add(time.Second)); err != nil {
+		t.Fatalf("SetReadDeadline returned error: %v", err)
+	}
+	if _, _, err := connection.ReadMessage(); err == nil {
+		t.Fatal("oversized message did not close the connection")
+	}
+}
+
+func TestClientRoomEventCannotSpoofReservedEvents(t *testing.T) {
+	payload := []byte(`{"type":"player.disconnected"}`)
+	event, err := clientRoomEvent(payload)
+	if err != nil {
+		t.Fatalf("clientRoomEvent returned error: %v", err)
+	}
+	var decoded struct {
+		Type    string `json:"type"`
+		Payload string `json:"payload"`
+	}
+	if err := json.Unmarshal(event, &decoded); err != nil {
+		t.Fatalf("failed to decode event: %v", err)
+	}
+	if decoded.Type != "room.message" {
+		t.Fatalf("type = %q, want %q", decoded.Type, "room.message")
+	}
+	if decoded.Payload != string(payload) {
+		t.Fatalf("payload = %q, want %q", decoded.Payload, payload)
 	}
 }
 

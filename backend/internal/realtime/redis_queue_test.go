@@ -122,6 +122,78 @@ func TestRedisQueueDropsStaleWaitingPlayers(t *testing.T) {
 	}
 }
 
+func TestRedisQueueStatusRefreshesActiveWaitingPlayer(t *testing.T) {
+	queue, _, client := newTestRedisQueue(t)
+	if _, err := queue.Join(t.Context(), "alice"); err != nil {
+		t.Fatalf("alice Join returned error: %v", err)
+	}
+
+	originalScore := float64(time.Now().Add(-20 * time.Second).UnixMilli())
+	if err := client.ZAdd(t.Context(), queue.key, redis.Z{Score: originalScore, Member: "alice"}).Err(); err != nil {
+		t.Fatalf("failed to age waiting player: %v", err)
+	}
+	status, err := queue.Status(t.Context(), "alice")
+	if err != nil {
+		t.Fatalf("alice Status returned error: %v", err)
+	}
+	if status.Status != MatchWaiting {
+		t.Fatalf("alice status = %q, want %q", status.Status, MatchWaiting)
+	}
+	refreshedScore, err := client.ZScore(t.Context(), queue.key, "alice").Result()
+	if err != nil {
+		t.Fatalf("failed to read refreshed score: %v", err)
+	}
+	if refreshedScore <= originalScore {
+		t.Fatalf("refreshed score = %v, want greater than %v", refreshedScore, originalScore)
+	}
+
+	match, err := queue.Join(t.Context(), "bob")
+	if err != nil {
+		t.Fatalf("bob Join returned error: %v", err)
+	}
+	if match.Status != MatchFound {
+		t.Fatalf("bob status = %q, want %q", match.Status, MatchFound)
+	}
+}
+
+func TestRedisQueueStatusExpiresUnpolledWaitingPlayer(t *testing.T) {
+	queue, _, client := newTestRedisQueue(t)
+	if _, err := queue.Join(t.Context(), "alice"); err != nil {
+		t.Fatalf("alice Join returned error: %v", err)
+	}
+
+	if err := client.ZAdd(t.Context(), queue.key, redis.Z{Score: float64(time.Now().Add(-queueStaleAfter - time.Millisecond).UnixMilli()), Member: "alice"}).Err(); err != nil {
+		t.Fatalf("failed to expire waiting player: %v", err)
+	}
+	status, err := queue.Status(t.Context(), "alice")
+	if err != nil {
+		t.Fatalf("Status returned error: %v", err)
+	}
+	if status.Status != MatchIdle {
+		t.Fatalf("status = %q, want %q", status.Status, MatchIdle)
+	}
+}
+
+func TestRedisQueueRoomAuthorizationOutlivesMatchResult(t *testing.T) {
+	queue, server, client := newTestRedisQueue(t)
+	if _, err := queue.Join(t.Context(), "alice"); err != nil {
+		t.Fatalf("alice Join returned error: %v", err)
+	}
+	match, err := queue.Join(t.Context(), "bob")
+	if err != nil {
+		t.Fatalf("bob Join returned error: %v", err)
+	}
+
+	server.FastForward(matchResultLifetime + time.Millisecond)
+	allowed, err := NewRedisRoom(client).CanJoin(t.Context(), match.ID, "alice")
+	if err != nil {
+		t.Fatalf("CanJoin returned error: %v", err)
+	}
+	if !allowed {
+		t.Fatal("room authorization expired with the matchmaking result")
+	}
+}
+
 func TestRedisQueueCancelRemovesWaitingPlayer(t *testing.T) {
 	queue, _, client := newTestRedisQueue(t)
 	if _, err := queue.Join(t.Context(), "alice"); err != nil {

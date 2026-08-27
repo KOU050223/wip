@@ -51,3 +51,79 @@ func TestRedisRoomBroadcastsBetweenSubscribers(t *testing.T) {
 		t.Fatalf("payload = %q", message.Payload)
 	}
 }
+
+func TestRedisRoomOldConnectionCannotClearNewPresenceLease(t *testing.T) {
+	_, _, client := newTestRedisQueue(t)
+	room := NewRedisRoom(client)
+
+	if err := room.SetPresence(t.Context(), "match-1", "alice", "old-lease"); err != nil {
+		t.Fatalf("old SetPresence returned error: %v", err)
+	}
+	if err := room.SetPresence(t.Context(), "match-1", "alice", "new-lease"); err != nil {
+		t.Fatalf("new SetPresence returned error: %v", err)
+	}
+	cleared, err := room.ClearPresence(t.Context(), "match-1", "alice", "old-lease")
+	if err != nil {
+		t.Fatalf("old ClearPresence returned error: %v", err)
+	}
+	if cleared {
+		t.Fatal("old lease reported that it cleared the new presence")
+	}
+
+	lease, err := client.Get(t.Context(), "match:match-1:presence:alice").Result()
+	if err != nil {
+		t.Fatalf("presence was removed: %v", err)
+	}
+	if lease != "new-lease" {
+		t.Fatalf("presence lease = %q, want %q", lease, "new-lease")
+	}
+}
+
+func TestRedisRoomOldConnectionCannotRefreshNewPresenceLease(t *testing.T) {
+	_, _, client := newTestRedisQueue(t)
+	room := NewRedisRoom(client)
+	if err := room.SetPresence(t.Context(), "match-1", "alice", "old-lease"); err != nil {
+		t.Fatalf("old SetPresence returned error: %v", err)
+	}
+	if err := room.SetPresence(t.Context(), "match-1", "alice", "new-lease"); err != nil {
+		t.Fatalf("new SetPresence returned error: %v", err)
+	}
+
+	refreshed, err := room.RefreshPresence(t.Context(), "match-1", "alice", "old-lease")
+	if err != nil {
+		t.Fatalf("old RefreshPresence returned error: %v", err)
+	}
+	if refreshed {
+		t.Fatal("old lease refreshed the new presence")
+	}
+	lease, err := client.Get(t.Context(), "match:match-1:presence:alice").Result()
+	if err != nil {
+		t.Fatalf("presence is missing: %v", err)
+	}
+	if lease != "new-lease" {
+		t.Fatalf("presence lease = %q, want %q", lease, "new-lease")
+	}
+}
+
+func TestRedisRoomReportsOpponentPresence(t *testing.T) {
+	queue, _, client := newTestRedisQueue(t)
+	if _, err := queue.Join(t.Context(), "alice"); err != nil {
+		t.Fatalf("alice Join returned error: %v", err)
+	}
+	match, err := queue.Join(t.Context(), "bob")
+	if err != nil {
+		t.Fatalf("bob Join returned error: %v", err)
+	}
+	room := NewRedisRoom(client)
+	if err := room.SetPresence(t.Context(), match.ID, "bob", "bob-lease"); err != nil {
+		t.Fatalf("SetPresence returned error: %v", err)
+	}
+
+	present, err := room.OpponentPresent(t.Context(), match.ID, "alice")
+	if err != nil {
+		t.Fatalf("OpponentPresent returned error: %v", err)
+	}
+	if !present {
+		t.Fatal("online opponent was reported absent")
+	}
+}

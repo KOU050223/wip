@@ -2,11 +2,13 @@ package httpapi
 
 import (
 	"context"
+	json "encoding/json/v2"
 	"errors"
 	"net/http"
 	"strconv"
 	"strings"
 	"time"
+	"uuid"
 
 	"github.com/KOU050223/wip/backend/internal/config"
 	"github.com/KOU050223/wip/backend/internal/realtime"
@@ -18,6 +20,9 @@ import (
 // healthCheckTimeout は /health での DB 疎通確認に許す時間。
 // DB がハングしてもヘルスチェック自体が詰まらないようにする。
 const healthCheckTimeout = 2 * time.Second
+const websocketMessageLimit = 64 << 10
+const presenceRefreshInterval = 10 * time.Second
+const websocketPongWait = 30 * time.Second
 
 // PingFunc は DB への疎通を確認する。
 type PingFunc func(context.Context) error
@@ -35,6 +40,21 @@ type Router struct {
 type matchmakingResponse struct {
 	Status  realtime.MatchStatus `json:"status"`
 	MatchID string               `json:"match_id,omitempty"`
+}
+
+type roomJoinedEvent struct {
+	Type              string `json:"type"`
+	OpponentConnected bool   `json:"opponent_connected"`
+}
+
+type roomPresenceEvent struct {
+	Type     string `json:"type"`
+	PlayerID string `json:"player_id"`
+}
+
+type roomClientEvent struct {
+	Type    string `json:"type"`
+	Payload string `json:"payload"`
 }
 
 func NewRouter(scoreUsecase *usecase.ScoreUsecase, allowOrigins []string, pingDatabase PingFunc) *gin.Engine {
@@ -120,24 +140,84 @@ func (r *Router) roomWebSocket(c *gin.Context) {
 		return
 	}
 	defer connection.Close()
-	roomContext, cancel := context.WithCancel(c.Request.Context())
-	defer cancel()
-	if err := r.room.SetPresence(roomContext, matchID, playerID); err != nil {
+	connection.SetReadLimit(websocketMessageLimit)
+	if err := connection.SetReadDeadline(time.Now().Add(websocketPongWait)); err != nil {
 		return
 	}
-	defer r.room.ClearPresence(context.Background(), matchID, playerID)
-	defer r.room.Publish(context.Background(), matchID, []byte(`{"type":"player.disconnected"}`))
-	if err := r.room.Publish(roomContext, matchID, []byte(`{"type":"player.connected"}`)); err != nil {
+	connection.SetPongHandler(func(string) error {
+		return connection.SetReadDeadline(time.Now().Add(websocketPongWait))
+	})
+	roomContext, cancel := context.WithCancel(c.Request.Context())
+	defer cancel()
+	subscription := r.room.Subscribe(roomContext, matchID)
+	defer subscription.Close()
+	if _, err := subscription.Receive(roomContext); err != nil {
+		return
+	}
+	leaseID := uuid.NewV7().String()
+	if err := r.room.SetPresence(roomContext, matchID, playerID, leaseID); err != nil {
+		return
+	}
+	defer func() {
+		cleared, clearErr := r.room.ClearPresence(context.Background(), matchID, playerID, leaseID)
+		if clearErr == nil && cleared {
+			event, marshalErr := json.Marshal(&roomPresenceEvent{Type: "player.disconnected", PlayerID: playerID})
+			if marshalErr == nil {
+				_ = r.room.Publish(context.Background(), matchID, event)
+			}
+		}
+	}()
+	opponentPresent, err := r.room.OpponentPresent(roomContext, matchID, playerID)
+	if err != nil {
+		return
+	}
+	joinedEvent, err := json.Marshal(&roomJoinedEvent{Type: "room.joined", OpponentConnected: opponentPresent})
+	if err != nil {
+		return
+	}
+	if err := connection.WriteMessage(websocket.TextMessage, joinedEvent); err != nil {
+		return
+	}
+	connectedEvent, err := json.Marshal(&roomPresenceEvent{Type: "player.connected", PlayerID: playerID})
+	if err != nil {
+		return
+	}
+	if err := r.room.Publish(roomContext, matchID, connectedEvent); err != nil {
 		return
 	}
 
-	subscription := r.room.Subscribe(roomContext, matchID)
-	defer subscription.Close()
+	go func() {
+		presenceTicks := time.Tick(presenceRefreshInterval)
+		for {
+			select {
+			case <-roomContext.Done():
+				return
+			case <-presenceTicks:
+				if connection.WriteControl(websocket.PingMessage, nil, time.Now().Add(5*time.Second)) != nil {
+					_ = connection.Close()
+					return
+				}
+				refreshed, refreshErr := r.room.RefreshPresence(roomContext, matchID, playerID, leaseID)
+				if refreshErr != nil || !refreshed {
+					_ = connection.Close()
+					return
+				}
+				presentEvent, marshalErr := json.Marshal(&roomPresenceEvent{Type: "player.present", PlayerID: playerID})
+				if marshalErr != nil || r.room.Publish(roomContext, matchID, presentEvent) != nil {
+					_ = connection.Close()
+					return
+				}
+			}
+		}
+	}()
 	go func() {
 		for {
 			message, receiveErr := subscription.ReceiveMessage(roomContext)
 			if receiveErr != nil {
 				return
+			}
+			if ownPresenceEvent([]byte(message.Payload), playerID) {
+				continue
 			}
 			if connection.WriteMessage(websocket.TextMessage, []byte(message.Payload)) != nil {
 				return
@@ -149,13 +229,26 @@ func (r *Router) roomWebSocket(c *gin.Context) {
 		if readErr != nil {
 			return
 		}
-		if r.room.SetPresence(roomContext, matchID, playerID) != nil {
+		event, eventErr := clientRoomEvent(payload)
+		if eventErr != nil {
 			return
 		}
-		if r.room.Publish(roomContext, matchID, payload) != nil {
+		if r.room.Publish(roomContext, matchID, event) != nil {
 			return
 		}
 	}
+}
+
+func clientRoomEvent(payload []byte) ([]byte, error) {
+	return json.Marshal(&roomClientEvent{Type: "room.message", Payload: string(payload)})
+}
+
+func ownPresenceEvent(payload []byte, playerID string) bool {
+	var event roomPresenceEvent
+	if err := json.Unmarshal(payload, &event); err != nil {
+		return false
+	}
+	return (event.Type == "player.connected" || event.Type == "player.disconnected" || event.Type == "player.present") && event.PlayerID == playerID
 }
 
 func (r *Router) websocketOriginAllowed(request *http.Request) bool {
@@ -172,9 +265,10 @@ func (r *Router) websocketOriginAllowed(request *http.Request) bool {
 }
 
 func (r *Router) createGuest(c *gin.Context) {
+	c.SetSameSite(http.SameSiteNoneMode)
 	if token, err := c.Cookie(realtime.GuestSessionCookieName); err == nil {
 		if _, valid := r.guestSessions.PlayerID(token, time.Now()); valid {
-			c.SetCookie(realtime.GuestSessionCookieName, token, 24*60*60, "/", "", false, true)
+			c.SetCookie(realtime.GuestSessionCookieName, token, 24*60*60, "/", "", true, true)
 			c.Status(http.StatusCreated)
 			return
 		}
@@ -184,7 +278,7 @@ func (r *Router) createGuest(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create guest session"})
 		return
 	}
-	c.SetCookie(realtime.GuestSessionCookieName, token, 24*60*60, "/", "", false, true)
+	c.SetCookie(realtime.GuestSessionCookieName, token, 24*60*60, "/", "", true, true)
 	c.Status(http.StatusCreated)
 }
 
@@ -197,6 +291,7 @@ func (r *Router) playerID(c *gin.Context) (string, bool) {
 }
 
 func (r *Router) matchmakingStatus(c *gin.Context) {
+	c.Header("Cache-Control", "no-store")
 	if r.matchmaking == nil {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "matchmaking is unavailable"})
 		return

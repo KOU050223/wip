@@ -1,8 +1,13 @@
 import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { resolveAPIBaseURL, resolveMatchWebSocketURL } from "../game/matchmaking";
+import {
+  resolveAPIBaseURL,
+  resolveMatchWebSocketURL,
+  roomConnectionLabel,
+} from "../game/matchmaking";
 
 const apiBaseURL = resolveAPIBaseURL(import.meta.env.VITE_API_BASE_URL);
+const opponentPresenceTimeoutMS = 25_000;
 
 function MatchRoomPage() {
   const { matchID } = useParams();
@@ -12,15 +17,30 @@ function MatchRoomPage() {
     if (!matchID) return;
 
     let retryTimer: number | undefined;
+    let opponentTimer: number | undefined;
     let closedByPage = false;
     let socket: WebSocket | undefined;
 
     const connect = () => {
       setConnectionState("対戦ルームへ接続中…");
       socket = new WebSocket(resolveMatchWebSocketURL(apiBaseURL, matchID));
-      socket.onopen = () => setConnectionState("対戦相手と接続しました");
+      socket.onopen = () => setConnectionState("対戦相手の接続を確認しています…");
+      socket.onmessage = (event) => {
+        if (typeof event.data !== "string") return;
+        const label = roomConnectionLabel(event.data);
+        if (!label) return;
+        setConnectionState(label);
+        if (opponentTimer !== undefined) window.clearTimeout(opponentTimer);
+        if (label === "対戦相手と接続しました") {
+          opponentTimer = window.setTimeout(
+            () => setConnectionState("対戦相手の再接続を待っています…"),
+            opponentPresenceTimeoutMS,
+          );
+        }
+      };
       socket.onclose = () => {
         if (closedByPage) return;
+        if (opponentTimer !== undefined) window.clearTimeout(opponentTimer);
         setConnectionState("接続が切れました。再接続中…");
         retryTimer = window.setTimeout(connect, 2_000);
       };
@@ -31,6 +51,7 @@ function MatchRoomPage() {
     return () => {
       closedByPage = true;
       if (retryTimer !== undefined) window.clearTimeout(retryTimer);
+      if (opponentTimer !== undefined) window.clearTimeout(opponentTimer);
       socket?.close();
     };
   }, [matchID]);
