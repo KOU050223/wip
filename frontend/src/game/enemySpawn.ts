@@ -40,5 +40,23 @@ export function spawnEnemy(position: Vector3, options?: { maxHp?: number }): Ene
     spawnedAt: performance.now(),
     requiredDirection: randomDirection(),
     modelPath: randomEnemyModel(),
+    isBoss: false,
+  };
+}
+
+/**
+ * ボス(ダースベーダー)を1体生成する。
+ */
+export function spawnBoss(position: Vector3, maxHp: number, modelPath: string): Enemy {
+  return {
+    id: `boss-${enemyIdCounter++}`,
+    position,
+    hp: maxHp,
+    maxHp,
+    state: "idle",
+    spawnedAt: performance.now(),
+    requiredDirection: randomDirection(),
+    modelPath,
+    isBoss: true,
   };
 }

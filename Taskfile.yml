@@ -25,6 +25,10 @@ tasks:
   dev:backend:
     internal: true
     dir: backend
+    # `backend/.env` はコンテナ実行にも使うため、ホストからComposeのPostgresへ
+    # 接続する `task dev` では localhost を明示して上書きする。
+    env:
+      DATABASE_URL: postgres://wip:wip_password@localhost:5432/wip?sslmode=disable
     cmds:
       - go run ./cmd/server
 

@@ -17,6 +17,7 @@ export type Enemy = {
   spawnedAt: number;
   requiredDirection: SwingDirection; // この方向に振らないとダメージが入らない
   modelPath: string; // 表示に使う3Dモデル(.glb)へのパス
+  isBoss: boolean; // ボス(ダースベーダー)かどうか。ターンごとの攻撃回数の分岐に使う
 };
 
 // ターン制バトルの現在の手番
