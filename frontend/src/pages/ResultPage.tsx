@@ -23,12 +23,20 @@ function ResultPage() {
           {(score ?? 0).toLocaleString()}
         </div>
       </div>
-      <Link
-        to="/ranking"
-        className="font-display px-10 py-3 border border-cyan-400/50 text-cyan-200 tracking-[0.3em] text-sm uppercase transition-colors hover:border-cyan-300 hover:bg-cyan-400/10 hover:text-white"
-      >
-        ランキングへ
-      </Link>
+      <div className="flex flex-col gap-4 sm:flex-row">
+        <Link
+          to="/ranking"
+          className="font-display px-10 py-3 border border-cyan-400/50 text-cyan-200 tracking-[0.3em] text-sm uppercase transition-colors hover:border-cyan-300 hover:bg-cyan-400/10 hover:text-white"
+        >
+          ランキングへ
+        </Link>
+        <Link
+          to="/"
+          className="font-display px-10 py-3 border border-amber-400/50 text-amber-200 tracking-[0.3em] text-sm uppercase transition-colors hover:border-amber-300 hover:bg-amber-400/10 hover:text-white"
+        >
+          タイトルに戻る
+        </Link>
+      </div>
     </section>
   );
 }

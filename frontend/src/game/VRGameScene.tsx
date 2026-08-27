@@ -4,18 +4,24 @@
 // 差し替えているのは入力方式・防御方式:
 // - 自分のターンの命中判定: Joy-Conの「振った方向が一致すれば無条件ヒット」から、
 //   剣先が敵の簡易ヒットボックスに実際に接触したときだけ判定するuseVRSwingHitに変更
-// - 相手のターンの防御: ボタン入力ではなく、敵が離れてポリゴン(発光球)を飛ばし、
-//   それをプレイヤーが自分の剣で斬れば防御成功、斬れなければ被弾する方式にする。
-//   方向は問わず、剣先がポリゴンに触れれば防御成功とする。
-// HUD(HP/コンボ/スコアの3Dパネル)・BGM/SFXはPhase 3/4で追加する。
-// 今はプレイヤー→敵→ボスの一連の流れを実機で確認できるよう、簡易的な3Dテキストのみ表示する。
+// - 相手のターンの防御: 敵が離れてポリゴン(発光球)を飛ばし、それをプレイヤーが
+//   自分の剣で斬れば防御成功、斬れなければ被弾する方式にする。方向は問わないが、
+//   赤=右手トリガー/青=右手グリップと色ごとに要求ボタンがあり、斬る瞬間に正しい
+//   ボタンを押していないと被弾扱い(ミス確定)になる。
+// HUD(HP/コンボ/スコアの3Dパネル)はPhase 3で追加済み。BGM/SFXはPhase 4で追加する。
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Canvas, useFrame } from "@react-three/fiber";
-import { Stars, Text, useGLTF } from "@react-three/drei";
-import { createXRStore, XR, XRSpace, useXRInputSourceStateContext } from "@react-three/xr";
-import { Box3, Group, Line3, Mesh, MeshStandardMaterial, Vector3 } from "three";
+import { Stars, useGLTF } from "@react-three/drei";
+import {
+  createXRStore,
+  XR,
+  XRSpace,
+  useXRInputSourceState,
+  useXRInputSourceStateContext,
+} from "@react-three/xr";
+import { Box3, DoubleSide, Group, Line3, Mesh, MeshStandardMaterial, Shape, Vector3 } from "three";
 import { clone as cloneSkeleton } from "three/examples/jsm/utils/SkeletonUtils.js";
 
 import type { Enemy, ComboState, SwingDirection, BattlePhase } from "./types";
@@ -65,20 +71,69 @@ const PROJECTILE_SPAWN_Y = 1.4; // ポリゴンを飛ばす高さの目安
 
 // 単調にならないよう、1ウェーブごとに「本数(方向)」「速度」「軌道の曲がり方」を
 // ランダムに変える。全部ミスなく斬れて初めて防御成功、1本でも受けたら被弾(ダメージは今まで通り1回分)。
-const PROJECTILE_TRAVEL_MS_MIN = 800; // 速い弾
-const PROJECTILE_TRAVEL_MS_MAX = 1500; // 遅い弾
+const PROJECTILE_TRAVEL_MS_MIN = 700; // 速い弾
+const PROJECTILE_TRAVEL_MS_MAX = 1000; // 遅い弾
 const PROJECTILE_CURVE_MIN = 0.3; // 直進に近い軌道
 const PROJECTILE_CURVE_MAX = 1.0; // 大きく弧を描く軌道
-const PROJECTILE_ANGLE_POOL = [-60, -30, 0, 30, 60]; // 度。0が正面、負が左、正が右
-const NORMAL_WAVE_SIZE = [1, 2] as const; // 通常敵: 1〜2本同時
-const BOSS_WAVE_SIZE = [2, 3] as const; // ボス: 2〜3本同時
+const PROJECTILE_CURVE_DIRECTIONS = ["up", "down", "left", "right"] as const;
+type ProjectileCurveDirection = (typeof PROJECTILE_CURVE_DIRECTIONS)[number];
+const NORMAL_WAVE_COUNT = 3; // 通常敵は常に3本同時
+const BOSS_WAVE_COUNT = 5; // ボスは理不尽にしたいので常に5本同時
+
+// 収束しすぎるとブレード判定範囲内に何もしなくても入ってきてしまうため、
+// 最終到達点をプレイヤーの頭の位置からわずかにずらし、実際に剣を動かして
+// 迎え撃つ必要があるようにする。
+const PROJECTILE_TARGET_OFFSET_MIN = 0.25;
+const PROJECTILE_TARGET_OFFSET_MAX = 0.55;
+
+// 同じウェーブ内の複数弾がほぼ同時・ほぼ同じ速度で飛んできて「複数本出す意味がない」
+// 状態にならないよう、発射タイミングと速度をそれぞれ「範囲を分割して1本ずつ別の帯に
+// 割り当てる」方式でわざと差をつける(単純な独立乱数だと偶然近い値になり得るため)。
+const PROJECTILE_LAUNCH_GAP_MS = 350; // 発射タイミングの基本間隔
+const PROJECTILE_LAUNCH_JITTER_MS = 200; // 間隔に足すランダムなブレ
+
+// ボールは赤/青のどちらかにランダムに色分けされ、斬るときに正しいボタンを
+// (剣を持つ右手コントローラーで)押していないと防御が成立しない。
+// 間違ったボタン・無入力のまま触れた場合は、その場で被弾扱い(ミス確定)にする。
+const PROJECTILE_COLORS = ["red", "blue"] as const;
+type ProjectileColor = (typeof PROJECTILE_COLORS)[number];
+const REQUIRED_BUTTON_BY_COLOR: Record<
+  ProjectileColor,
+  "xr-standard-trigger" | "xr-standard-squeeze"
+> = {
+  red: "xr-standard-trigger",
+  blue: "xr-standard-squeeze",
+};
+const PROJECTILE_COLOR_HEX: Record<ProjectileColor, string> = {
+  red: "#ff3344",
+  blue: "#3388ff",
+};
+
+function randomProjectileColor(): ProjectileColor {
+  return PROJECTILE_COLORS[Math.floor(Math.random() * PROJECTILE_COLORS.length)];
+}
+
+// プレイヤーの頭の位置そのものではなく、そこから全方位ランダムにずらした点へ向かわせる。
+function randomTargetOffset(): Vector3 {
+  const angle = Math.random() * Math.PI * 2;
+  const radius = randomBetween(PROJECTILE_TARGET_OFFSET_MIN, PROJECTILE_TARGET_OFFSET_MAX);
+  return new Vector3(Math.cos(angle) * radius, Math.sin(angle) * radius, 0);
+}
 
 function randomBetween(min: number, max: number): number {
   return min + Math.random() * (max - min);
 }
 
-function randomInt(min: number, max: number): number {
-  return Math.floor(randomBetween(min, max + 1));
+// [min, max]をcount個の帯に分け、シャッフルした順で1本ずつ別の帯からランダムな値を取る。
+// 同じウェーブ内の値同士が必ずある程度離れることを保証する(速度のばらつき用)。
+function pickSpreadValues(count: number, min: number, max: number): number[] {
+  const binSize = (max - min) / count;
+  const bins = Array.from({ length: count }, (_, i) => i);
+  for (let i = bins.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [bins[i], bins[j]] = [bins[j], bins[i]];
+  }
+  return bins.map((bin) => min + bin * binSize + Math.random() * binSize);
 }
 
 // ボールは実際に敵がいる位置(退避後の座標)から飛んでくるようにする。
@@ -88,23 +143,27 @@ function spawnPositionFromEnemy(enemyPos: Vector3): Vector3 {
   return new Vector3(enemyPos.x, PROJECTILE_SPAWN_Y, enemyPos.z);
 }
 
-// 直進(spawn→プレイヤー)に対して水平に垂直な方向へランダムな強さで膨らませ、
-// 弓なりの軌道(フェイント)を作るための軸ベクトル。
-function curveAxisForAngle(angleDeg: number): Vector3 {
-  const rad = (angleDeg * Math.PI) / 180;
-  const perpendicular = new Vector3(Math.cos(rad), 0, Math.sin(rad));
+// 発射点は敵の位置のまま、進行中の弧の膨らみ方だけで「上下左右いろんな方向から
+// 来ている感」を出す。水平(左右)だけでなく垂直(上下)にも膨らませられるようにする。
+const CURVE_AXIS_BY_DIRECTION: Record<ProjectileCurveDirection, Vector3> = {
+  up: new Vector3(0, 1, 0),
+  down: new Vector3(0, -1, 0),
+  left: new Vector3(-1, 0, 0),
+  right: new Vector3(1, 0, 0),
+};
+
+function curveAxisForDirection(direction: ProjectileCurveDirection): Vector3 {
   const strength = randomBetween(PROJECTILE_CURVE_MIN, PROJECTILE_CURVE_MAX);
-  const sign = Math.random() < 0.5 ? -1 : 1;
-  return perpendicular.multiplyScalar(strength * sign);
+  return CURVE_AXIS_BY_DIRECTION[direction].clone().multiplyScalar(strength);
 }
 
-// 1ウェーブ分の出現角度をランダムに(重複なく)選ぶ。
-function pickWaveAngles(isBoss: boolean): number[] {
-  const [min, max] = isBoss ? BOSS_WAVE_SIZE : NORMAL_WAVE_SIZE;
-  const count = randomInt(min, max);
-  const pool = [...PROJECTILE_ANGLE_POOL];
-  const picked: number[] = [];
-  for (let i = 0; i < count && pool.length > 0; i++) {
+// 1ウェーブ分の飛来方向(上/下/左/右)を選ぶ。方向の種類(4つ)を使い切るまでは
+// 重複なく選び、それ以上(ボスの5本など)は補充してどれかの方向を重複させる。
+function pickWaveDirections(count: number): ProjectileCurveDirection[] {
+  let pool: ProjectileCurveDirection[] = [];
+  const picked: ProjectileCurveDirection[] = [];
+  for (let i = 0; i < count; i++) {
+    if (pool.length === 0) pool = [...PROJECTILE_CURVE_DIRECTIONS];
     const idx = Math.floor(Math.random() * pool.length);
     picked.push(pool[idx]);
     pool.splice(idx, 1);
@@ -118,6 +177,8 @@ type ProjectileInstance = {
   startTime: number;
   travelMs: number;
   curveAxis: Vector3;
+  color: ProjectileColor;
+  targetOffset: Vector3;
 };
 
 const BOSS_APPEAR_AFTER_MS = 2 * 60 * 1000;
@@ -126,12 +187,41 @@ const BOSS_MODEL_PATH = "/models/DV.glb";
 const BOSS_ATTACKS_PER_TURN = 1;
 const BOSS_CLEAR_BONUS_SCORE = 5000;
 
-const DIRECTION_ARROWS: Record<SwingDirection, string> = {
-  up: "↑",
-  down: "↓",
-  left: "←",
-  right: "→",
+// 要求スイング方向の矢印。以前はUnicode矢印文字(↑↓←→)をTextで描画していたが、
+// フォントによって上下方向のグリフが正しく表示されないことがあったため、
+// シンプルな矢印ポリゴン(shapeGeometry)をZ軸回転させる方式に変更した。
+const ARROW_ROTATION_Z: Record<SwingDirection, number> = {
+  up: 0,
+  down: Math.PI,
+  left: Math.PI / 2,
+  right: -Math.PI / 2,
 };
+
+function createArrowShape(): Shape {
+  const shape = new Shape();
+  shape.moveTo(0, 0.22);
+  shape.lineTo(-0.16, -0.06);
+  shape.lineTo(-0.06, -0.06);
+  shape.lineTo(-0.06, -0.22);
+  shape.lineTo(0.06, -0.22);
+  shape.lineTo(0.06, -0.06);
+  shape.lineTo(0.16, -0.06);
+  shape.closePath();
+  return shape;
+}
+const ARROW_SHAPE = createArrowShape();
+
+function DirectionArrowIndicator({ direction }: { direction: SwingDirection }) {
+  return (
+    <mesh
+      position={[0, MODEL_TARGET_HEIGHT + 0.3, 0.41]}
+      rotation={[0, 0, ARROW_ROTATION_Z[direction]]}
+    >
+      <shapeGeometry args={[ARROW_SHAPE]} />
+      <meshBasicMaterial color="#ffe066" side={DoubleSide} />
+    </mesh>
+  );
+}
 
 const MODEL_TARGET_HEIGHT = 1.6;
 
@@ -263,17 +353,7 @@ function EnemyMesh({ enemy, phase }: { enemy: Enemy; phase: BattlePhase }) {
     <group ref={groupRef}>
       <EnemyModel modelPath={enemy.modelPath} state={enemy.state} />
       <EnemyHitboxDebugBox visible={phase === "playerTurn" && enemy.state !== "dying"} />
-      {enemy.state !== "dying" && (
-        <Text
-          position={[0, MODEL_TARGET_HEIGHT + 0.3, 0.41]}
-          fontSize={0.4}
-          color="#ffe066"
-          anchorX="center"
-          anchorY="middle"
-        >
-          {DIRECTION_ARROWS[enemy.requiredDirection]}
-        </Text>
-      )}
+      {enemy.state !== "dying" && <DirectionArrowIndicator direction={enemy.requiredDirection} />}
     </group>
   );
 }
@@ -281,7 +361,9 @@ function EnemyMesh({ enemy, phase }: { enemy: Enemy; phase: BattlePhase }) {
 // 相手のターンに敵が飛ばしてくるポリゴン(発光球)の1本分。プレイヤーの頭(カメラ)を
 // 目掛けて進むが、直進だけだと単調なので出現角度ごとに横方向へ弓なりに膨らむ軌道
 // (curveAxis)と、本ごとにバラつく速度(travelMs)を持たせて読みにくくしている。
-// 刃(柄側の端〜剣先の線分)が一定距離まで近づいたら斬れたものとしてonResolve(true)を呼ぶ。
+// 赤=トリガー、青=グリップと色ごとに要求ボタンが決まっており、剣(柄側の端〜剣先の
+// 線分)が一定距離まで近づいた瞬間に、右手コントローラーで正しいボタンを押していれば
+// 防御成功、間違ったボタン・無入力ならその場で被弾扱い(ミス確定)としてonResolveを呼ぶ。
 // onResolve自体は呼び出し側(VRGameLoop)で「既に決着済みか」をガードするため、
 // ここでは範囲内にいる間毎フレーム呼んでも問題ない。
 function ProjectileVisual({
@@ -296,12 +378,24 @@ function ProjectileVisual({
   const saberBase = useSaberBaseRef();
   const bladeLineRef = useRef(new Line3());
   const closestPointRef = useRef(new Vector3());
+  const targetRef = useRef(new Vector3());
+  const rightController = useXRInputSourceState("controller", "right");
 
   useFrame((state) => {
     const mesh = meshRef.current;
     if (!mesh) return;
-    const t = Math.min(1, (performance.now() - instance.startTime) / instance.travelMs);
-    mesh.position.lerpVectors(instance.spawnPosition, state.camera.position, t);
+    // 発射をずらしている(instance.startTimeが未来)間はまだ敵の手元で待機させ、
+    // 自分の番が来てから直進を始める。
+    const elapsed = performance.now() - instance.startTime;
+    if (elapsed < 0) {
+      mesh.position.copy(instance.spawnPosition);
+      return;
+    }
+    const t = Math.min(1, elapsed / instance.travelMs);
+    // プレイヤーの頭の位置ちょうどに収束すると剣を動かさなくても勝手に当たって
+    // しまうため、targetOffset分だけずらした点を最終到達点にする。
+    targetRef.current.copy(state.camera.position).add(instance.targetOffset);
+    mesh.position.lerpVectors(instance.spawnPosition, targetRef.current, t);
     // 進行度0→1に対してsin(πt)は0→1→0と山なりになるため、経路の中間で
     // curveAxis方向に最大まで膨らみ、最後はプレイヤーの正面へ収束する弓なりの軌道になる。
     mesh.position.addScaledVector(instance.curveAxis, Math.sin(t * Math.PI));
@@ -310,16 +404,20 @@ function ProjectileVisual({
     bladeLineRef.current.closestPointToPoint(mesh.position, true, closestPointRef.current);
 
     if (mesh.position.distanceTo(closestPointRef.current) < PROJECTILE_HIT_RADIUS) {
-      onResolve(instance.id, true);
+      const requiredButton = REQUIRED_BUTTON_BY_COLOR[instance.color];
+      const isCorrectButtonPressed = rightController?.gamepad[requiredButton]?.state === "pressed";
+      onResolve(instance.id, isCorrectButtonPressed);
     }
   });
+
+  const colorHex = PROJECTILE_COLOR_HEX[instance.color];
 
   return (
     <mesh ref={meshRef} position={instance.spawnPosition}>
       <sphereGeometry args={[0.12, 12, 12]} />
       <meshStandardMaterial
-        color="#ff3344"
-        emissive="#ff3344"
+        color={colorHex}
+        emissive={colorHex}
         emissiveIntensity={2}
         toneMapped={false}
       />
@@ -369,11 +467,12 @@ function VRGameLoop({
 
   // 1ウェーブ(同時に飛んでくる複数本)ぶんの決着待ち管理。
   // resolvedIdsRefは「このIDはもう斬った/被弾判定済み」の二重処理防止ガード、
-  // waveUnresolvedRefは残り本数のカウンタ、waveHadMissRefは1本でも被弾したかのフラグ。
+  // waveUnresolvedRefは残り本数のカウンタ、waveMissCountRefは逃した(被弾した)本数。
+  // ダメージは逃した本数分だけ加算する(ENEMY_ATTACK_DAMAGE × 本数)。
   const resolvedIdsRef = useRef(new Set<number>());
   const waveTimersRef = useRef(new Map<number, ReturnType<typeof setTimeout>>());
   const waveUnresolvedRef = useRef(0);
-  const waveHadMissRef = useRef(false);
+  const waveMissCountRef = useRef(0);
   const cooldownTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const attacksRemainingRef = useRef(1);
   const bossPendingRef = useRef(false);
@@ -408,35 +507,46 @@ function VRGameLoop({
     waveTimersRef.current.forEach((timer) => clearTimeout(timer));
     waveTimersRef.current.clear();
     resolvedIdsRef.current.clear();
-    waveHadMissRef.current = false;
+    waveMissCountRef.current = 0;
 
-    const angles = pickWaveAngles(enemy.isBoss);
-    const startTime = performance.now();
+    const directions = pickWaveDirections(enemy.isBoss ? BOSS_WAVE_COUNT : NORMAL_WAVE_COUNT);
+    const waveStartTime = performance.now();
     const spawnPosition = spawnPositionFromEnemy(enemyPosition.current);
-    const instances: ProjectileInstance[] = angles.map((angleDeg) => {
+    const travelMsList = pickSpreadValues(
+      directions.length,
+      PROJECTILE_TRAVEL_MS_MIN,
+      PROJECTILE_TRAVEL_MS_MAX,
+    );
+    // 1本目は0〜JITTER、2本目はGAP〜GAP+JITTER…と発射タイミングを確実にずらす。
+    const launchOffsets = directions.map(
+      (_, i) => i * PROJECTILE_LAUNCH_GAP_MS + randomBetween(0, PROJECTILE_LAUNCH_JITTER_MS),
+    );
+    const instances: ProjectileInstance[] = directions.map((direction, i) => {
       projectileIdRef.current += 1;
       return {
         id: projectileIdRef.current,
         spawnPosition: spawnPosition.clone(),
-        startTime,
-        travelMs: randomBetween(PROJECTILE_TRAVEL_MS_MIN, PROJECTILE_TRAVEL_MS_MAX),
-        curveAxis: curveAxisForAngle(angleDeg),
+        startTime: waveStartTime + launchOffsets[i],
+        travelMs: travelMsList[i],
+        curveAxis: curveAxisForDirection(direction),
+        color: randomProjectileColor(),
+        targetOffset: randomTargetOffset(),
       };
     });
 
     waveUnresolvedRef.current = instances.length;
     setProjectiles(instances);
 
-    instances.forEach((instance) => {
+    instances.forEach((instance, i) => {
       const timer = setTimeout(() => {
         resolveProjectile(instance.id, false);
-      }, instance.travelMs);
+      }, launchOffsets[i] + instance.travelMs);
       waveTimersRef.current.set(instance.id, timer);
     });
   }
 
   // 1本の決着(斬れた/届いた)が付くたびに呼ばれる。ウェーブ全本が決着したら
-  // finishEnemyTurnを呼ぶ(1本でも被弾していれば防御失敗として扱う)。
+  // finishEnemyTurnを呼ぶ(逃した本数分だけダメージが入る)。
   function resolveProjectile(id: number, sliced: boolean) {
     if (resolvedIdsRef.current.has(id)) return;
     resolvedIdsRef.current.add(id);
@@ -447,15 +557,16 @@ function VRGameLoop({
       waveTimersRef.current.delete(id);
     }
     setProjectiles((prev) => prev.filter((p) => p.id !== id));
-    if (!sliced) waveHadMissRef.current = true;
+    if (!sliced) waveMissCountRef.current += 1;
 
     waveUnresolvedRef.current -= 1;
     if (waveUnresolvedRef.current <= 0) {
-      finishEnemyTurn(!waveHadMissRef.current);
+      finishEnemyTurn(waveMissCountRef.current);
     }
   }
 
-  function finishEnemyTurn(defended: boolean) {
+  function finishEnemyTurn(missCount: number) {
+    const defended = missCount === 0;
     setCombo((prev) => (defended ? prev : resetCombo(prev)));
 
     function advanceTurn() {
@@ -482,7 +593,7 @@ function VRGameLoop({
     }
 
     setPlayerHp((hp) => {
-      const nextHp = Math.max(0, hp - ENEMY_ATTACK_DAMAGE);
+      const nextHp = Math.max(0, hp - ENEMY_ATTACK_DAMAGE * missCount);
       if (nextHp <= 0) {
         if (!gameOverFiredRef.current) {
           gameOverFiredRef.current = true;
@@ -633,9 +744,14 @@ export default function VRGameScene() {
                 <XR store={store}>
                   <VRGameLoop
                     onStateChange={() => {}}
-                    onGameOver={(score, result) =>
-                      navigate("/result", { state: { score, result } })
-                    }
+                    onGameOver={(score, result) => {
+                      // VRセッションを張ったままナビゲートすると、ヘッドセット側の表示が
+                      // このCanvasの最終フレームで止まったままになり、/resultページの
+                      // スコア表示がヘッドセットから見えなくなる。先にセッションを終了させ、
+                      // 通常の2D画面に戻してから遷移する。
+                      store.getState().session?.end();
+                      navigate("/result", { state: { score, result } });
+                    }}
                   />
                 </XR>
               </EnemyPositionContext.Provider>
