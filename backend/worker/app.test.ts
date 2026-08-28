@@ -4,7 +4,7 @@ import { createApp } from "./app";
 
 const env = {
   CORS_ALLOW_ORIGINS: "https://game.example",
-} as Env;
+} as unknown as Env;
 
 describe("createApp", () => {
   it("answers an allowed AI preflight request without forwarding it to the container", async () => {
