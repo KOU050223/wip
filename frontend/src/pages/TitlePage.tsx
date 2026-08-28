@@ -4,7 +4,7 @@ function TitlePage() {
   return (
     <section className="min-h-screen flex flex-col items-center justify-center gap-12 px-6 text-center">
       <h1 className="title-flicker font-display text-4xl md:text-6xl tracking-[0.3em] text-amber-200 drop-shadow-[0_0_25px_rgba(252,211,77,0.5)]">
-        タイトル
+        イマジンブレイカー
       </h1>
       <div className="flex flex-col gap-4 sm:flex-row">
         <Link

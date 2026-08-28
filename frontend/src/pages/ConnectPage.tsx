@@ -50,7 +50,7 @@ function ConnectPage() {
             </dl>
           )}
           <Link
-            to="/game"
+            to="/tutorial"
             className="font-display px-10 py-3 border border-cyan-400/50 text-cyan-200 tracking-[0.3em] text-sm uppercase transition-colors hover:border-cyan-300 hover:bg-cyan-400/10 hover:text-white"
           >
             ゲームへ
