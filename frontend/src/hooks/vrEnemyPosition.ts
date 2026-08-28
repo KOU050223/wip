@@ -1,7 +1,7 @@
 // vrEnemyPosition.ts
 // 敵は自分のターン(近い位置)と相手のターン(離れてポリゴンを飛ばす)で
 // 表示位置がアニメーションして変化する。この「今実際にどこにいるか」を
-// EnemyMesh側がuseFrameで毎フレーム更新し、useVRSwingHit側が読み取れるように
+// EnemyMesh側がuseFrameで毎フレーム更新し、Rapierの敵コライダーが読み取れるように
 // Context経由で共有する(useSaberTipRefと同じ仕組み)。
 
 import { createContext, useContext, type RefObject } from "react";

@@ -3,14 +3,14 @@
 // 戦闘ロジック(types.ts/enemySpawn.ts/combo.ts/hp.ts/attackDetection.ts)は無改変で流用し、
 // 差し替えているのは入力方式・防御方式:
 // - 自分のターンの命中判定: Joy-Conの「振った方向が一致すれば無条件ヒット」から、
-//   剣先が敵の簡易ヒットボックスに実際に接触したときだけ判定するuseVRSwingHitに変更
+//   Rapierセンサーで剣と敵のヒットボックスが接触したときだけ判定する方式に変更
 // - 相手のターンの防御: 敵が離れてポリゴン(発光球)を飛ばし、それをプレイヤーが
 //   自分の剣で斬れば防御成功、斬れなければ被弾する方式にする。方向は問わないが、
 //   赤=右手トリガー/青=右手グリップと色ごとに要求ボタンがあり、斬る瞬間に正しい
 //   ボタンを押していないと被弾扱い(ミス確定)になる。
 // HUD(HP/コンボ/スコアの3Dパネル)はPhase 3で追加済み。BGM/SFXはPhase 4で追加する。
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Canvas, useFrame } from "@react-three/fiber";
 import { Stars, useGLTF } from "@react-three/drei";
@@ -21,8 +21,25 @@ import {
   useXRInputSourceState,
   useXRInputSourceStateContext,
 } from "@react-three/xr";
-import { Box3, DoubleSide, Group, Line3, Mesh, MeshStandardMaterial, Shape, Vector3 } from "three";
+import {
+  Box3,
+  DoubleSide,
+  Group,
+  Mesh,
+  MeshStandardMaterial,
+  Quaternion,
+  Shape,
+  Vector3,
+} from "three";
 import { clone as cloneSkeleton } from "three/examples/jsm/utils/SkeletonUtils.js";
+import {
+  BallCollider,
+  CapsuleCollider,
+  CuboidCollider,
+  Physics,
+  RigidBody,
+  type RapierRigidBody,
+} from "@react-three/rapier";
 
 import type { Enemy, ComboState, SwingDirection, BattlePhase } from "./types";
 import { spawnEnemy, spawnBoss, randomDirection } from "./enemySpawn";
@@ -30,10 +47,13 @@ import { calculateDamage } from "./attackDetection";
 import { applyDamage, recoverFromHit } from "./hp";
 import { createInitialComboState, registerHit, resetCombo } from "./combo";
 import { addScore } from "./score";
+import { KINEMATIC_SENSOR_COLLISION_TYPES } from "./rapierCollision";
+import { getProjectileWorldPosition } from "./projectileMotion";
+import { applyProjectileWorldPosition } from "./projectilePose";
 import VRLightsaber from "../components/three/VRLightsaber";
 import { SaberTipContext, useSaberTipRef } from "../hooks/vrSaberTip";
 import { SaberBaseContext, useSaberBaseRef } from "../hooks/vrSaberBase";
-import { useVRSwingHit } from "../hooks/useVRSwingHit";
+import { useVRSwingDirection } from "../hooks/vrSwingDirection";
 import {
   EnemyHitboxSizeContext,
   useEnemyHitboxSizeRef,
@@ -66,7 +86,6 @@ const TURN_COOLDOWN_MS = 300;
 // 敵が離れてポリゴンを飛ばす防御演出まわり
 const ENEMY_RETREAT_MS = 500; // 自分の攻撃直後、敵が離れきるまでの待ち時間(退避アニメの尺)
 const ENEMY_MOVE_LERP_SPEED = 4; // 敵の近寄る/離れるアニメーションの追従速度
-const PROJECTILE_HIT_RADIUS = 0.25; // 剣先がこの距離まで近づいたら斬れたとみなす
 const PROJECTILE_SPAWN_Y = 1.4; // ポリゴンを飛ばす高さの目安
 
 // 単調にならないよう、1ウェーブごとに「本数(方向)」「速度」「軌道の曲がり方」を
@@ -108,6 +127,12 @@ const PROJECTILE_COLOR_HEX: Record<ProjectileColor, string> = {
   red: "#ff3344",
   blue: "#3388ff",
 };
+
+// Rapierの衝突グループ。剣(group 1) と攻撃対象(group 2) だけを接触させるため、
+// 敵・飛来物同士がセンサーイベントを起こすことはない。
+const BLADE_COLLISION_GROUPS = 0x00010002;
+const TARGET_COLLISION_GROUPS = 0x00020001;
+const BLADE_COLLIDER_RADIUS = 0.025;
 
 function randomProjectileColor(): ProjectileColor {
   return PROJECTILE_COLORS[Math.floor(Math.random() * PROJECTILE_COLORS.length)];
@@ -252,9 +277,17 @@ function SpaceBackground() {
 // 敵モデル本体(GameScene.tsxのEnemyModelと同じ正規化ロジック)。
 // 高さはMODEL_TARGET_HEIGHTに揃うが、横幅・奥行きはモデルの縦横比次第でばらつくため、
 // 実際にスケーリングした後の実寸をEnemyHitboxSizeContext経由で共有し、
-// 当たり判定(useVRSwingHit)とその可視化(EnemyHitboxDebugBox)がモデルごとの
+// Rapierの当たり判定とその可視化(EnemyHitboxDebugBox)がモデルごとの
 // 実サイズに追従できるようにする。
-function EnemyModel({ modelPath, state }: { modelPath: string; state: Enemy["state"] }) {
+function EnemyModel({
+  modelPath,
+  state,
+  onHitboxSizeChange,
+}: {
+  modelPath: string;
+  state: Enemy["state"];
+  onHitboxSizeChange: (size: Vector3) => void;
+}) {
   const { scene } = useGLTF(modelPath);
   const hitboxSize = useEnemyHitboxSizeRef();
 
@@ -278,7 +311,8 @@ function EnemyModel({ modelPath, state }: { modelPath: string; state: Enemy["sta
 
   useEffect(() => {
     hitboxSize.current.copy(actualSize);
-  }, [actualSize, hitboxSize]);
+    onHitboxSizeChange(actualSize);
+  }, [actualSize, hitboxSize, onHitboxSizeChange]);
 
   useEffect(() => {
     const isHit = state === "hit";
@@ -329,7 +363,15 @@ function EnemyHitboxDebugBox({ visible }: { visible: boolean }) {
 // (HP変化などで)頻繁に再生成されるたびにアニメーション中の位置が巻き戻ってしまうため、
 // 初期配置(新しい敵が出た瞬間)だけenemy.idをキーに一度スナップし、
 // それ以降はuseFrameで近い/遠いをアニメーションさせる完全に命令的な制御にする。
-function EnemyMesh({ enemy, phase }: { enemy: Enemy; phase: BattlePhase }) {
+function EnemyMesh({
+  enemy,
+  phase,
+  onHitboxSizeChange,
+}: {
+  enemy: Enemy;
+  phase: BattlePhase;
+  onHitboxSizeChange: (size: Vector3) => void;
+}) {
   const groupRef = useRef<Group>(null);
   const enemyPosition = useEnemyPositionRef();
 
@@ -351,7 +393,11 @@ function EnemyMesh({ enemy, phase }: { enemy: Enemy; phase: BattlePhase }) {
 
   return (
     <group ref={groupRef}>
-      <EnemyModel modelPath={enemy.modelPath} state={enemy.state} />
+      <EnemyModel
+        modelPath={enemy.modelPath}
+        state={enemy.state}
+        onHitboxSizeChange={onHitboxSizeChange}
+      />
       <EnemyHitboxDebugBox visible={phase === "playerTurn" && enemy.state !== "dying"} />
       {enemy.state !== "dying" && <DirectionArrowIndicator direction={enemy.requiredDirection} />}
     </group>
@@ -374,11 +420,9 @@ function ProjectileVisual({
   onResolve: (id: number, sliced: boolean) => void;
 }) {
   const meshRef = useRef<Mesh>(null);
-  const saberTip = useSaberTipRef();
-  const saberBase = useSaberBaseRef();
-  const bladeLineRef = useRef(new Line3());
-  const closestPointRef = useRef(new Vector3());
+  const rigidBodyRef = useRef<RapierRigidBody>(null);
   const targetRef = useRef(new Vector3());
+  const projectilePositionRef = useRef(new Vector3());
   const rightController = useXRInputSourceState("controller", "right");
 
   useFrame((state) => {
@@ -388,40 +432,62 @@ function ProjectileVisual({
     // 自分の番が来てから直進を始める。
     const elapsed = performance.now() - instance.startTime;
     if (elapsed < 0) {
-      mesh.position.copy(instance.spawnPosition);
+      applyProjectileWorldPosition(mesh.position, instance.spawnPosition, (position) => {
+        rigidBodyRef.current?.setNextKinematicTranslation(position);
+      });
       return;
     }
-    const t = Math.min(1, elapsed / instance.travelMs);
     // プレイヤーの頭の位置ちょうどに収束すると剣を動かさなくても勝手に当たって
     // しまうため、targetOffset分だけずらした点を最終到達点にする。
     targetRef.current.copy(state.camera.position).add(instance.targetOffset);
-    mesh.position.lerpVectors(instance.spawnPosition, targetRef.current, t);
-    // 進行度0→1に対してsin(πt)は0→1→0と山なりになるため、経路の中間で
-    // curveAxis方向に最大まで膨らみ、最後はプレイヤーの正面へ収束する弓なりの軌道になる。
-    mesh.position.addScaledVector(instance.curveAxis, Math.sin(t * Math.PI));
-
-    bladeLineRef.current.set(saberBase.current, saberTip.current);
-    bladeLineRef.current.closestPointToPoint(mesh.position, true, closestPointRef.current);
-
-    if (mesh.position.distanceTo(closestPointRef.current) < PROJECTILE_HIT_RADIUS) {
-      const requiredButton = REQUIRED_BUTTON_BY_COLOR[instance.color];
-      const isCorrectButtonPressed = rightController?.gamepad[requiredButton]?.state === "pressed";
-      onResolve(instance.id, isCorrectButtonPressed);
-    }
+    const worldPosition = getProjectileWorldPosition(
+      {
+        spawnPosition: instance.spawnPosition,
+        targetPosition: targetRef.current,
+        curveAxis: instance.curveAxis,
+        elapsedMs: elapsed,
+        travelMs: instance.travelMs,
+      },
+      projectilePositionRef.current,
+    );
+    applyProjectileWorldPosition(mesh.position, worldPosition, (position) => {
+      rigidBodyRef.current?.setNextKinematicTranslation(position);
+    });
   });
 
   const colorHex = PROJECTILE_COLOR_HEX[instance.color];
 
   return (
-    <mesh ref={meshRef} position={instance.spawnPosition}>
-      <sphereGeometry args={[0.12, 12, 12]} />
-      <meshStandardMaterial
-        color={colorHex}
-        emissive={colorHex}
-        emissiveIntensity={2}
-        toneMapped={false}
-      />
-    </mesh>
+    <>
+      <RigidBody
+        ref={rigidBodyRef}
+        type="kinematicPosition"
+        colliders={false}
+        position={instance.spawnPosition}
+      >
+        <BallCollider
+          args={[0.12]}
+          sensor
+          collisionGroups={TARGET_COLLISION_GROUPS}
+          activeCollisionTypes={KINEMATIC_SENSOR_COLLISION_TYPES}
+          onIntersectionEnter={() => {
+            const requiredButton = REQUIRED_BUTTON_BY_COLOR[instance.color];
+            const isCorrectButtonPressed =
+              rightController?.gamepad[requiredButton]?.state === "pressed";
+            onResolve(instance.id, isCorrectButtonPressed);
+          }}
+        />
+      </RigidBody>
+      <mesh ref={meshRef} position={instance.spawnPosition}>
+        <sphereGeometry args={[0.12, 12, 12]} />
+        <meshStandardMaterial
+          color={colorHex}
+          emissive={colorHex}
+          emissiveIntensity={2}
+          toneMapped={false}
+        />
+      </mesh>
+    </>
   );
 }
 
@@ -449,6 +515,72 @@ function VRControllerVisual() {
   );
 }
 
+/** XRコントローラーに追従する、刃全体を表すRapierセンサー。 */
+function VRBladeCollider() {
+  const saberTip = useSaberTipRef();
+  const saberBase = useSaberBaseRef();
+  const rigidBodyRef = useRef<RapierRigidBody>(null);
+  const centerRef = useRef(new Vector3());
+  const directionRef = useRef(new Vector3());
+  const rotationRef = useRef(new Quaternion());
+  const upAxisRef = useRef(new Vector3(0, 1, 0));
+
+  useFrame(() => {
+    const base = saberBase.current;
+    const tip = saberTip.current;
+    const length = base.distanceTo(tip);
+    if (length === 0) return;
+    centerRef.current.addVectors(base, tip).multiplyScalar(0.5);
+    directionRef.current.subVectors(tip, base).normalize();
+    rotationRef.current.setFromUnitVectors(upAxisRef.current, directionRef.current);
+    rigidBodyRef.current?.setNextKinematicTranslation(centerRef.current);
+    rigidBodyRef.current?.setNextKinematicRotation(rotationRef.current);
+  });
+
+  return (
+    <RigidBody ref={rigidBodyRef} type="kinematicPosition" colliders={false}>
+      <CapsuleCollider
+        args={[0.6, BLADE_COLLIDER_RADIUS]}
+        sensor
+        collisionGroups={BLADE_COLLISION_GROUPS}
+        activeCollisionTypes={KINEMATIC_SENSOR_COLLISION_TYPES}
+      />
+    </RigidBody>
+  );
+}
+
+/** 敵モデルの実寸へ追従するRapierセンサー。当たり判定の発火元をここに集約する。 */
+function RapierEnemyHitbox({
+  position,
+  size,
+  onBladeHit,
+}: {
+  position: Vector3;
+  size: Vector3;
+  onBladeHit: () => void;
+}) {
+  const rigidBodyRef = useRef<RapierRigidBody>(null);
+  const centerRef = useRef(new Vector3());
+  const halfSize = useMemo(() => size.clone().multiplyScalar(HITBOX_MARGIN / 2), [size]);
+
+  useFrame(() => {
+    centerRef.current.set(position.x, position.y + halfSize.y, position.z);
+    rigidBodyRef.current?.setNextKinematicTranslation(centerRef.current);
+  });
+
+  return (
+    <RigidBody ref={rigidBodyRef} type="kinematicPosition" colliders={false}>
+      <CuboidCollider
+        args={[halfSize.x, halfSize.y, halfSize.z]}
+        sensor
+        collisionGroups={TARGET_COLLISION_GROUPS}
+        activeCollisionTypes={KINEMATIC_SENSOR_COLLISION_TYPES}
+        onIntersectionEnter={onBladeHit}
+      />
+    </RigidBody>
+  );
+}
+
 function VRGameLoop({
   onStateChange,
   onGameOver,
@@ -461,6 +593,9 @@ function VRGameLoop({
   const [combo, setCombo] = useState<ComboState>(createInitialComboState());
   const [playerHp, setPlayerHp] = useState(PLAYER_MAX_HP);
   const [projectiles, setProjectiles] = useState<ProjectileInstance[]>([]);
+  const [enemyHitboxSize, setEnemyHitboxSize] = useState(
+    () => new Vector3(0.9, MODEL_TARGET_HEIGHT, 0.6),
+  );
   const enemyPosition = useEnemyPositionRef();
   const gameOverFiredRef = useRef(false);
   const projectileIdRef = useRef(0);
@@ -476,6 +611,7 @@ function VRGameLoop({
   const cooldownTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const attacksRemainingRef = useRef(1);
   const bossPendingRef = useRef(false);
+  const lastBladeHitAtRef = useRef(0);
 
   const comboRef = useRef(combo);
   const onGameOverRef = useRef(onGameOver);
@@ -606,13 +742,18 @@ function VRGameLoop({
     });
   }
 
-  // 自分のターン: 剣先が敵に当たった瞬間だけ呼ばれる(useVRSwingHit内でphase/敵状態を判定済み)
-  useVRSwingHit(enemy, phase, (direction) => {
+  const getSwingDirection = useVRSwingDirection();
+  const onEnemyBladeHit = useCallback(() => {
+    const now = performance.now();
+    if (now - lastBladeHitAtRef.current <= 250) return;
+    if (phase !== "playerTurn" || enemy.state === "dying" || enemy.state === "dead") return;
+    const direction = getSwingDirection();
+    if (!direction) return;
     if (direction !== enemy.requiredDirection) return; // 方向違いは不発、ターンは継続
 
     const damage = calculateDamage(1, PLAYER_ATTACK_DAMAGE); // VRにswingPowerの概念はないため固定値
-    const now = performance.now();
     const hitEnemy = applyDamage(enemy, damage);
+    lastBladeHitAtRef.current = now;
     setEnemy(hitEnemy);
 
     setCombo((prev) => {
@@ -623,7 +764,11 @@ function VRGameLoop({
     if (hitEnemy.hp > 0) {
       setPhase("enemyTurn");
     }
-  });
+  }, [enemy, getSwingDirection, phase]);
+
+  const onHitboxSizeChange = useCallback((size: Vector3) => {
+    setEnemyHitboxSize((previous) => (previous.equals(size) ? previous : size.clone()));
+  }, []);
 
   useEffect(() => {
     if (enemy.state !== "hit") return;
@@ -692,7 +837,14 @@ function VRGameLoop({
           <pointLight position={[2, 3, 2]} intensity={1} />
         </>
       )}
-      <EnemyMesh enemy={enemy} phase={phase} />
+      <EnemyMesh enemy={enemy} phase={phase} onHitboxSizeChange={onHitboxSizeChange} />
+      {phase === "playerTurn" && enemy.state !== "dying" && enemy.state !== "dead" && (
+        <RapierEnemyHitbox
+          position={enemyPosition.current}
+          size={enemyHitboxSize}
+          onBladeHit={onEnemyBladeHit}
+        />
+      )}
       {projectiles.map((instance) => (
         <ProjectileVisual key={instance.id} instance={instance} onResolve={resolveProjectile} />
       ))}
@@ -742,17 +894,20 @@ export default function VRGameScene() {
             <EnemyHitboxSizeContext.Provider value={enemyHitboxSizeRef}>
               <EnemyPositionContext.Provider value={enemyPositionRef}>
                 <XR store={store}>
-                  <VRGameLoop
-                    onStateChange={() => {}}
-                    onGameOver={(score, result) => {
-                      // VRセッションを張ったままナビゲートすると、ヘッドセット側の表示が
-                      // このCanvasの最終フレームで止まったままになり、/resultページの
-                      // スコア表示がヘッドセットから見えなくなる。先にセッションを終了させ、
-                      // 通常の2D画面に戻してから遷移する。
-                      store.getState().session?.end();
-                      navigate("/result", { state: { score, result } });
-                    }}
-                  />
+                  <Physics gravity={[0, 0, 0]} timeStep="vary">
+                    <VRBladeCollider />
+                    <VRGameLoop
+                      onStateChange={() => {}}
+                      onGameOver={(score, result) => {
+                        // VRセッションを張ったままナビゲートすると、ヘッドセット側の表示が
+                        // このCanvasの最終フレームで止まったままになり、/resultページの
+                        // スコア表示がヘッドセットから見えなくなる。先にセッションを終了させ、
+                        // 通常の2D画面に戻してから遷移する。
+                        store.getState().session?.end();
+                        navigate("/result", { state: { score, result } });
+                      }}
+                    />
+                  </Physics>
                 </XR>
               </EnemyPositionContext.Provider>
             </EnemyHitboxSizeContext.Provider>
