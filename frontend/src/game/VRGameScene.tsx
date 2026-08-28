@@ -52,6 +52,7 @@ import {
 } from "../hooks/vrEnemyHitbox";
 import { EnemyPositionContext, useEnemyPositionRef } from "../hooks/vrEnemyPosition";
 import VRBattleHUD from "./VRBattleHUD";
+import VRTutorial from "./VRTutorial";
 
 // 敵にダメージを与えるたびに鳴らす効果音。GameScene.tsxのBGM/SFXと同じ規約で、
 // このパスに音声ファイルを置けば自動的に再生される(未配置でも再生に失敗するだけで動作に影響しない)。
@@ -806,6 +807,7 @@ export default function VRGameScene() {
   const enemyHitSfxRef = useRef<HTMLAudioElement>(null);
   const guardSuccessSfxRef = useRef<HTMLAudioElement>(null);
   const playerHitSfxRef = useRef<HTMLAudioElement>(null);
+  const [showTutorial, setShowTutorial] = useState(true);
 
   function playEnemyHitSfx() {
     const audio = enemyHitSfxRef.current;
@@ -860,20 +862,24 @@ export default function VRGameScene() {
             <EnemyHitboxSizeContext.Provider value={enemyHitboxSizeRef}>
               <EnemyPositionContext.Provider value={enemyPositionRef}>
                 <XR store={store}>
-                  <VRGameLoop
-                    onStateChange={() => {}}
-                    onEnemyHit={playEnemyHitSfx}
-                    onGuardSuccess={playGuardSuccessSfx}
-                    onPlayerHit={playPlayerHitSfx}
-                    onGameOver={(score, result) => {
-                      // VRセッションを張ったままナビゲートすると、ヘッドセット側の表示が
-                      // このCanvasの最終フレームで止まったままになり、/resultページの
-                      // スコア表示がヘッドセットから見えなくなる。先にセッションを終了させ、
-                      // 通常の2D画面に戻してから遷移する。
-                      store.getState().session?.end();
-                      navigate("/result", { state: { score, result } });
-                    }}
-                  />
+                  {showTutorial ? (
+                    <VRTutorial onComplete={() => setShowTutorial(false)} />
+                  ) : (
+                    <VRGameLoop
+                      onStateChange={() => {}}
+                      onEnemyHit={playEnemyHitSfx}
+                      onGuardSuccess={playGuardSuccessSfx}
+                      onPlayerHit={playPlayerHitSfx}
+                      onGameOver={(score, result) => {
+                        // VRセッションを張ったままナビゲートすると、ヘッドセット側の表示が
+                        // このCanvasの最終フレームで止まったままになり、/resultページの
+                        // スコア表示がヘッドセットから見えなくなる。先にセッションを終了させ、
+                        // 通常の2D画面に戻してから遷移する。
+                        store.getState().session?.end();
+                        navigate("/result", { state: { score, result } });
+                      }}
+                    />
+                  )}
                 </XR>
               </EnemyPositionContext.Provider>
             </EnemyHitboxSizeContext.Provider>
