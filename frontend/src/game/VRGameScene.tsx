@@ -67,6 +67,15 @@ const GUARD_SUCCESS_SFX_VOLUME = 1;
 const PLAYER_HIT_SFX_PATH = "/audio/maou_se_battle18.mp3";
 const PLAYER_HIT_SFX_VOLUME = 1;
 
+// 剣を振って(刃が敵のヒットボックスに入って)スイングが成立するたびに鳴らす効果音。
+// Joy-Con版のスイングSFXと同じファイルを流用する。
+const SWING_SFX_PATH = "/audio/raitose-ba-.m4a";
+const SWING_SFX_VOLUME = 1;
+
+// 敵がポリゴンのウェーブを撃つ瞬間に鳴らす効果音。
+const ENEMY_SHOOT_SFX_PATH = "/audio/shooting.m4a";
+const ENEMY_SHOOT_SFX_VOLUME = 1;
+
 // 被弾したかどうかが分かりづらい問題への対策。HPが減るほど視界の周辺が赤く
 // なるようにする(カメラに追従する球を内側から見せ、depthTestを切って常に
 // 手前に描画することで、通常の画面オーバーレイの代わりにVRでも機能させる)。
@@ -124,17 +133,11 @@ const PROJECTILE_LAUNCH_GAP_MS = 350; // 発射タイミングの基本間隔
 const PROJECTILE_LAUNCH_JITTER_MS = 200; // 間隔に足すランダムなブレ
 
 // ボールは赤/青のどちらかにランダムに色分けされ、斬るときに正しいボタンを
-// (剣を持つ右手コントローラーで)押していないと防御が成立しない。
-// 間違ったボタン・無入力のまま触れた場合は、その場で被弾扱い(ミス確定)にする。
+// (剣を持つ右手コントローラーで)押していないと防御が成立しない。赤=トリガー、青=グリップ。
+// 間違ったボタン・無入力のまま触れた場合、および両方同時押しの場合は、
+// その場で被弾扱い(ミス確定)にする(両方押せばどちらにも該当する抜け道を防ぐ)。
 const PROJECTILE_COLORS = ["red", "blue"] as const;
 type ProjectileColor = (typeof PROJECTILE_COLORS)[number];
-const REQUIRED_BUTTON_BY_COLOR: Record<
-  ProjectileColor,
-  "xr-standard-trigger" | "xr-standard-squeeze"
-> = {
-  red: "xr-standard-trigger",
-  blue: "xr-standard-squeeze",
-};
 const PROJECTILE_COLOR_HEX: Record<ProjectileColor, string> = {
   red: "#ff3344",
   blue: "#3388ff",
@@ -474,8 +477,12 @@ function ProjectileVisual({
     bladeLineRef.current.closestPointToPoint(mesh.position, true, closestPointRef.current);
 
     if (mesh.position.distanceTo(closestPointRef.current) < PROJECTILE_HIT_RADIUS) {
-      const requiredButton = REQUIRED_BUTTON_BY_COLOR[instance.color];
-      const isCorrectButtonPressed = rightController?.gamepad[requiredButton]?.state === "pressed";
+      const triggerPressed = rightController?.gamepad["xr-standard-trigger"]?.state === "pressed";
+      const gripPressed = rightController?.gamepad["xr-standard-squeeze"]?.state === "pressed";
+      // 両方同時押しは「赤にも青にも該当する」抜け道になってしまうため、
+      // 両方押されている間はどちらの色に対しても不成立(被弾)にする。
+      const requiredPressed = instance.color === "red" ? triggerPressed : gripPressed;
+      const isCorrectButtonPressed = requiredPressed && !(triggerPressed && gripPressed);
       onResolve(instance.id, isCorrectButtonPressed);
     }
   });
@@ -525,12 +532,16 @@ function VRGameLoop({
   onEnemyHit,
   onGuardSuccess,
   onPlayerHit,
+  onSwing,
+  onEnemyShoot,
 }: {
   onStateChange: (enemy: Enemy, combo: ComboState, playerHp: number, phase: BattlePhase) => void;
   onGameOver: (score: number, result: "clear" | "over") => void;
   onEnemyHit: () => void;
   onGuardSuccess: () => void;
   onPlayerHit: () => void;
+  onSwing: () => void;
+  onEnemyShoot: () => void;
 }) {
   const [enemy, setEnemy] = useState<Enemy>(createEnemy);
   const [phase, setPhase] = useState<BattlePhase>("playerTurn");
@@ -584,6 +595,7 @@ function VRGameLoop({
     waveTimersRef.current.clear();
     resolvedIdsRef.current.clear();
     waveMissCountRef.current = 0;
+    onEnemyShoot();
 
     const directions = pickWaveDirections(enemy.isBoss ? BOSS_WAVE_COUNT : NORMAL_WAVE_COUNT);
     const waveStartTime = performance.now();
@@ -689,6 +701,7 @@ function VRGameLoop({
 
   // 自分のターン: 剣先が敵に当たった瞬間だけ呼ばれる(useVRSwingHit内でphase/敵状態を判定済み)
   useVRSwingHit(enemy, phase, (direction) => {
+    onSwing(); // 方向の正誤に関わらず、刃が敵のヒットボックスに入って振りが成立した時点で鳴らす
     if (direction !== enemy.requiredDirection) return; // 方向違いは不発、ターンは継続
 
     const damage = calculateDamage(1, PLAYER_ATTACK_DAMAGE); // VRにswingPowerの概念はないため固定値
@@ -807,6 +820,8 @@ export default function VRGameScene() {
   const enemyHitSfxRef = useRef<HTMLAudioElement>(null);
   const guardSuccessSfxRef = useRef<HTMLAudioElement>(null);
   const playerHitSfxRef = useRef<HTMLAudioElement>(null);
+  const swingSfxRef = useRef<HTMLAudioElement>(null);
+  const enemyShootSfxRef = useRef<HTMLAudioElement>(null);
   const [showTutorial, setShowTutorial] = useState(true);
 
   function playEnemyHitSfx() {
@@ -839,11 +854,33 @@ export default function VRGameScene() {
     });
   }
 
+  function playSwingSfx() {
+    const audio = swingSfxRef.current;
+    if (!audio) return;
+    audio.currentTime = 0;
+    audio.volume = SWING_SFX_VOLUME;
+    audio.play().catch(() => {
+      // 音声ファイル未配置・自動再生ブロックなどは無視してよい
+    });
+  }
+
+  function playEnemyShootSfx() {
+    const audio = enemyShootSfxRef.current;
+    if (!audio) return;
+    audio.currentTime = 0;
+    audio.volume = ENEMY_SHOOT_SFX_VOLUME;
+    audio.play().catch(() => {
+      // 音声ファイル未配置・自動再生ブロックなどは無視してよい
+    });
+  }
+
   return (
     <div className="relative w-full h-[70vh] min-h-[500px]">
       <audio ref={enemyHitSfxRef} src={ENEMY_HIT_SFX_PATH} preload="auto" />
       <audio ref={guardSuccessSfxRef} src={GUARD_SUCCESS_SFX_PATH} preload="auto" />
       <audio ref={playerHitSfxRef} src={PLAYER_HIT_SFX_PATH} preload="auto" />
+      <audio ref={swingSfxRef} src={SWING_SFX_PATH} preload="auto" />
+      <audio ref={enemyShootSfxRef} src={ENEMY_SHOOT_SFX_PATH} preload="auto" />
       <button
         type="button"
         onClick={() => {
@@ -870,6 +907,8 @@ export default function VRGameScene() {
                       onEnemyHit={playEnemyHitSfx}
                       onGuardSuccess={playGuardSuccessSfx}
                       onPlayerHit={playPlayerHitSfx}
+                      onSwing={playSwingSfx}
+                      onEnemyShoot={playEnemyShootSfx}
                       onGameOver={(score, result) => {
                         // VRセッションを張ったままナビゲートすると、ヘッドセット側の表示が
                         // このCanvasの最終フレームで止まったままになり、/resultページの
