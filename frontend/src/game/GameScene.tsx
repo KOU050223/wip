@@ -30,6 +30,8 @@ import { useJoyConContext } from "../contexts/JoyConContext";
 import { useSwingDetection } from "../hooks/useSwingDetection";
 import { useButtonPress, randomDefenseButton } from "../hooks/useButtonPress";
 import type { JoyConState } from "../lib/joycon/joyConDevice";
+import { requestTaunt } from "./tauntClient";
+import { shouldDisplayTaunt, shouldRequestTauntForEnemy } from "./tauntVisibility";
 import CreditsScene from "./CreditsScene";
 import { CREDIT_PUNCH_SFX_PATH, CREDIT_PUNCH_SFX_VOLUME } from "./credits";
 
@@ -202,6 +204,7 @@ function GameLoop({
   const [phase, setPhase] = useState<BattlePhase>("playerTurn");
   const [combo, setCombo] = useState<ComboState>(createInitialComboState());
   const [playerHp, setPlayerHp] = useState(PLAYER_MAX_HP);
+  const playerHpRef = useRef(PLAYER_MAX_HP);
   const [defenseButton, setDefenseButton] = useState<DefenseButton>(randomDefenseButton);
   const [splatters, setSplatters] = useState<{ id: string; position: [number, number, number] }[]>(
     [],
@@ -317,18 +320,17 @@ function GameLoop({
       return;
     }
 
-    setPlayerHp((hp) => {
-      const nextHp = Math.max(0, hp - ENEMY_ATTACK_DAMAGE);
-      if (nextHp <= 0) {
-        if (!gameOverFiredRef.current) {
-          gameOverFiredRef.current = true;
-          onGameOverRef.current(comboRef.current.score, "over");
-        }
-      } else {
-        advanceTurn();
+    const nextHp = Math.max(0, playerHpRef.current - ENEMY_ATTACK_DAMAGE);
+    playerHpRef.current = nextHp;
+    setPlayerHp(nextHp);
+    if (nextHp <= 0) {
+      if (!gameOverFiredRef.current) {
+        gameOverFiredRef.current = true;
+        onGameOverRef.current(comboRef.current.score, "over");
       }
-      return nextHp;
-    });
+    } else {
+      advanceTurn();
+    }
   }
 
   // 自分のターン: 方向が一致した振りだけ攻撃として成立する
@@ -381,6 +383,7 @@ function GameLoop({
       setEnemy(next);
       setPhase("playerTurn");
       if (next.isBoss) {
+        playerHpRef.current = PLAYER_MAX_HP;
         setPlayerHp(PLAYER_MAX_HP); // ボス出現時は削れたHPを全回復する
       }
     }, DYING_DURATION_MS);
@@ -474,6 +477,9 @@ export default function GameScene() {
   const [hudDefenseButton, setHudDefenseButton] = useState<DefenseButton>("r");
   const [showBossIntro, setShowBossIntro] = useState(false);
   const [isShaking, setIsShaking] = useState(false);
+  const [taunt, setTaunt] = useState("");
+  const tauntHistoryRef = useRef<string[]>([]);
+  const activeEnemyIdRef = useRef<string | null>(null);
   // "battle": ターン制バトル / "credits": DV撃破後のエンドロール。
   // ルート(/game)は変えず、同じ Canvas 内で描画するコンポーネントだけ差し替える。
   // 開発時のみ /game?credits=1 でボス戦を飛ばしてエンドロールを直接確認できる。
@@ -571,6 +577,20 @@ export default function GameScene() {
             isJoyConConnected={joyCon.isConnected}
             onSwing={playSwingSfx}
             onStateChange={(enemy, combo, playerHp, phase, defenseButton) => {
+              if (shouldRequestTauntForEnemy(activeEnemyIdRef.current, enemy.id)) {
+                activeEnemyIdRef.current = enemy.id;
+                setTaunt("");
+                void requestTaunt({
+                  trigger: "enemyAppeared",
+                  playerHpPercent: (playerHp / PLAYER_MAX_HP) * 100,
+                  isBoss: enemy.isBoss,
+                  recentPhrases: tauntHistoryRef.current,
+                }).then((phrase) => {
+                  if (!shouldDisplayTaunt(activeEnemyIdRef.current, enemy.id)) return;
+                  tauntHistoryRef.current = [phrase, ...tauntHistoryRef.current].slice(0, 3);
+                  setTaunt(phrase);
+                });
+              }
               // ボス出現の瞬間だけタイトルカード+赤フラッシュ+シェイクを発火する
               if (enemy.isBoss && !wasBossRef.current) {
                 setShowBossIntro(true);
@@ -614,6 +634,7 @@ export default function GameScene() {
             phase={hudPhase}
             defenseButton={hudDefenseButton}
             isBoss={hudEnemy?.isBoss ?? false}
+            taunt={taunt}
           />
         </div>
       )}
