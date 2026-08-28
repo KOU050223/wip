@@ -4,7 +4,7 @@
 // そのため当たり判定の大きさを固定値にすると、モデルによって
 // 「大きすぎて/小さすぎて判定がわからない」というズレが生じる。
 // EnemyModelが実際にスケーリングした後の実寸(幅・高さ・奥行き)をこのRefへ書き込み、
-// useVRSwingHitが毎フレームそれを読んで当たり判定の大きさに反映する。
+// Rapierの敵コライダーがこの値を読み、当たり判定の大きさに反映する。
 
 import { createContext, useContext, type RefObject } from "react";
 import { Vector3 } from "three";

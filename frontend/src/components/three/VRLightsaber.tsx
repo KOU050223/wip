@@ -21,7 +21,7 @@ function VRLightsaber() {
   const saberBase = useSaberBaseRef();
 
   // 刃の根元・剣先の実座標を毎フレーム共有Refへ書き込む。
-  // 当たり判定は剣先の点だけでなく、この2点を結ぶ刃全体の線分で行う(useVRSwingHit/ProjectileVisual)。
+  // 当たり判定はこの2点を結ぶ刃全体を表すRapierカプセルで行う。
   useFrame(() => {
     if (tipRef.current) {
       tipRef.current.getWorldPosition(saberTip.current);
@@ -49,7 +49,7 @@ function VRLightsaber() {
           toneMapped={false}
         />
       </mesh>
-      {/* 刃全体を線分として扱うための目印(根元・剣先)。useVRSwingHitがgetWorldPositionで参照する */}
+      {/* 刃全体を表すRapierカプセルの両端。VRBladeColliderがgetWorldPositionで参照する */}
       <group ref={baseRef} position={[0, BLADE_START, 0]} name="saber-base" />
       <group ref={tipRef} position={[0, BLADE_START + BLADE_LENGTH, 0]} name="saber-tip" />
     </group>
