@@ -936,9 +936,21 @@ export default function VRGameScene() {
   // VRセッションを張ったままナビゲートすると、ヘッドセット側の表示がこのCanvasの
   // 最終フレームで止まり /result のスコアが見えなくなる。先にセッションを終了して
   // 通常の2D画面へ戻してから遷移する。
-  function goToResult(score: number, result: "clear" | "over") {
+  //
+  // session.end() は非同期。await せずに navigate すると、セッション終了時にブラウザが
+  // WebXR用に自動で積んでいた履歴エントリを巻き戻す動きと /result への遷移が競合し、
+  // 結果画面に location.state が渡らず(= score 0 / GAME OVER 表示)になることがある。
+  // セッションを完全に閉じてから遷移する。二重遷移も防ぐ。
+  const navigatedToResultRef = useRef(false);
+  async function goToResult(score: number, result: "clear" | "over") {
+    if (navigatedToResultRef.current) return;
+    navigatedToResultRef.current = true;
     stopEndingBgm();
-    store.getState().session?.end();
+    try {
+      await store.getState().session?.end();
+    } catch {
+      // 既に終了済みなどは無視してよい
+    }
     navigate("/result", { state: { score, result } });
   }
 
