@@ -843,10 +843,7 @@ export default function VRGameScene() {
   const enemyPositionRef = useRef(ENEMY_NEAR_POSITION.clone());
   const fistLeftRef = useRef(new Vector3());
   const fistRightRef = useRef(new Vector3());
-  const fistRefs = useMemo<FistRefs>(
-    () => ({ left: fistLeftRef, right: fistRightRef }),
-    [],
-  );
+  const fistRefs = useMemo<FistRefs>(() => ({ left: fistLeftRef, right: fistRightRef }), []);
   const enemyHitSfxRef = useRef<HTMLAudioElement>(null);
   const guardSuccessSfxRef = useRef<HTMLAudioElement>(null);
   const playerHitSfxRef = useRef<HTMLAudioElement>(null);

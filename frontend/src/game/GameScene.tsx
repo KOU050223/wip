@@ -563,9 +563,7 @@ export default function GameScene() {
             score={clearScore}
             joyConState={joyCon.state}
             onPunch={playCreditPunchSfx}
-            onFinish={() =>
-              navigate("/result", { state: { score: clearScore, result: "clear" } })
-            }
+            onFinish={() => navigate("/result", { state: { score: clearScore, result: "clear" } })}
           />
         ) : (
           <GameLoop
