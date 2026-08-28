@@ -30,6 +30,8 @@ import { useJoyConContext } from "../contexts/JoyConContext";
 import { useSwingDetection } from "../hooks/useSwingDetection";
 import { useButtonPress, randomDefenseButton } from "../hooks/useButtonPress";
 import type { JoyConState } from "../lib/joycon/joyConDevice";
+import CreditsScene from "./CreditsScene";
+import { CREDIT_PUNCH_SFX_PATH, CREDIT_PUNCH_SFX_VOLUME } from "./credits";
 
 // セーバー(柄)の設置位置(方向を取らないので固定)
 const SABER_HIT_POSITION = new Vector3(0, 0.7, -1);
@@ -472,11 +474,19 @@ export default function GameScene() {
   const [hudDefenseButton, setHudDefenseButton] = useState<DefenseButton>("r");
   const [showBossIntro, setShowBossIntro] = useState(false);
   const [isShaking, setIsShaking] = useState(false);
+  // "battle": ターン制バトル / "credits": DV撃破後のエンドロール。
+  // ルート(/game)は変えず、同じ Canvas 内で描画するコンポーネントだけ差し替える。
+  // 開発時のみ /game?credits=1 でボス戦を飛ばしてエンドロールを直接確認できる。
+  const creditsPreview =
+    import.meta.env.DEV && new URLSearchParams(window.location.search).has("credits");
+  const [mode, setMode] = useState<"battle" | "credits">(creditsPreview ? "credits" : "battle");
+  const [clearScore, setClearScore] = useState(creditsPreview ? 12345 : 0);
   const wasBossRef = useRef(false);
   const prevPlayerHpRef = useRef(PLAYER_MAX_HP);
   const battleBgmRef = useRef<HTMLAudioElement>(null);
   const bossBgmRef = useRef<HTMLAudioElement>(null);
   const swingSfxRef = useRef<HTMLAudioElement>(null);
+  const creditPunchSfxRef = useRef<HTMLAudioElement>(null);
 
   function triggerShake() {
     setIsShaking(true);
@@ -491,6 +501,27 @@ export default function GameScene() {
     audio.play().catch(() => {
       // 音声ファイル未配置・自動再生ブロックなどは無視してよい
     });
+  }
+
+  function playCreditPunchSfx() {
+    const audio = creditPunchSfxRef.current;
+    if (!audio) return;
+    audio.currentTime = 0;
+    audio.volume = CREDIT_PUNCH_SFX_VOLUME;
+    audio.play().catch(() => {});
+  }
+
+  // DV撃破 → エンドロールへ。ボスBGMを止め、オーケストラBGMを締めの曲として流す。
+  function enterCredits(score: number) {
+    setClearScore(score);
+    setMode("credits");
+    bossBgmRef.current?.pause();
+    const bgm = battleBgmRef.current;
+    if (bgm) {
+      bgm.currentTime = 0;
+      bgm.volume = BGM_VOLUME;
+      bgm.play().catch(() => {});
+    }
   }
 
   // ボス戦↔通常戦の切り替わりに合わせてBGMを即座に切り替える。
@@ -525,50 +556,68 @@ export default function GameScene() {
       <audio ref={battleBgmRef} src={BATTLE_BGM_PATH} loop preload="auto" />
       <audio ref={bossBgmRef} src={BOSS_BGM_PATH} loop preload="auto" />
       <audio ref={swingSfxRef} src={SWING_SFX_PATH} preload="auto" />
+      <audio ref={creditPunchSfxRef} src={CREDIT_PUNCH_SFX_PATH} preload="auto" />
       <Canvas camera={{ position: [0, 1.5, 2], fov: 75 }}>
-        <GameLoop
-          joyConState={joyCon.state}
-          isJoyConConnected={joyCon.isConnected}
-          onSwing={playSwingSfx}
-          onStateChange={(enemy, combo, playerHp, phase, defenseButton) => {
-            // ボス出現の瞬間だけタイトルカード+赤フラッシュ+シェイクを発火する
-            if (enemy.isBoss && !wasBossRef.current) {
-              setShowBossIntro(true);
-              triggerShake();
-              setTimeout(() => setShowBossIntro(false), BOSS_INTRO_DURATION_MS);
-            }
-            wasBossRef.current = enemy.isBoss;
+        {mode === "credits" ? (
+          <CreditsScene
+            score={clearScore}
+            joyConState={joyCon.state}
+            onPunch={playCreditPunchSfx}
+            onFinish={() => navigate("/result", { state: { score: clearScore, result: "clear" } })}
+          />
+        ) : (
+          <GameLoop
+            joyConState={joyCon.state}
+            isJoyConConnected={joyCon.isConnected}
+            onSwing={playSwingSfx}
+            onStateChange={(enemy, combo, playerHp, phase, defenseButton) => {
+              // ボス出現の瞬間だけタイトルカード+赤フラッシュ+シェイクを発火する
+              if (enemy.isBoss && !wasBossRef.current) {
+                setShowBossIntro(true);
+                triggerShake();
+                setTimeout(() => setShowBossIntro(false), BOSS_INTRO_DURATION_MS);
+              }
+              wasBossRef.current = enemy.isBoss;
 
-            // ボス戦中にダメージを受けたらシェイクする
-            if (enemy.isBoss && playerHp < prevPlayerHpRef.current) {
-              triggerShake();
-            }
-            prevPlayerHpRef.current = playerHp;
+              // ボス戦中にダメージを受けたらシェイクする
+              if (enemy.isBoss && playerHp < prevPlayerHpRef.current) {
+                triggerShake();
+              }
+              prevPlayerHpRef.current = playerHp;
 
-            setHudCombo(combo);
-            setHudHp(playerHp);
-            setHudEnemy(enemy);
-            setHudPhase(phase);
-            setHudDefenseButton(defenseButton);
-          }}
-          onGameOver={(score, result) => navigate("/result", { state: { score, result } })}
-        />
+              setHudCombo(combo);
+              setHudHp(playerHp);
+              setHudEnemy(enemy);
+              setHudPhase(phase);
+              setHudDefenseButton(defenseButton);
+            }}
+            onGameOver={(score, result) => {
+              if (result === "clear") {
+                enterCredits(score);
+                return;
+              }
+              navigate("/result", { state: { score, result } });
+            }}
+          />
+        )}
       </Canvas>
-      <div className="absolute inset-0 pointer-events-none">
-        <BattleHUD
-          combo={hudCombo.combo}
-          score={hudCombo.score}
-          hp={hudHp}
-          maxHp={PLAYER_MAX_HP}
-          enemyName={hudEnemy?.isBoss ? "DARTH VADER" : "ENEMY"}
-          enemyHp={hudEnemy?.hp ?? ENEMY_MAX_HP}
-          enemyMaxHp={hudEnemy?.maxHp ?? ENEMY_MAX_HP}
-          phase={hudPhase}
-          defenseButton={hudDefenseButton}
-          isBoss={hudEnemy?.isBoss ?? false}
-        />
-      </div>
-      {showBossIntro && (
+      {mode === "battle" && (
+        <div className="absolute inset-0 pointer-events-none">
+          <BattleHUD
+            combo={hudCombo.combo}
+            score={hudCombo.score}
+            hp={hudHp}
+            maxHp={PLAYER_MAX_HP}
+            enemyName={hudEnemy?.isBoss ? "DARTH VADER" : "ENEMY"}
+            enemyHp={hudEnemy?.hp ?? ENEMY_MAX_HP}
+            enemyMaxHp={hudEnemy?.maxHp ?? ENEMY_MAX_HP}
+            phase={hudPhase}
+            defenseButton={hudDefenseButton}
+            isBoss={hudEnemy?.isBoss ?? false}
+          />
+        </div>
+      )}
+      {mode === "battle" && showBossIntro && (
         <div className="boss-flash absolute inset-0 flex items-center justify-center pointer-events-none">
           <h2 className="title-flicker font-display text-4xl md:text-6xl tracking-[0.3em] text-red-500 drop-shadow-[0_0_30px_rgba(239,68,68,0.8)]">
             DARTH VADER
