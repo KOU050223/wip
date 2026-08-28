@@ -51,7 +51,11 @@ import {
   HITBOX_MARGIN,
 } from "../hooks/vrEnemyHitbox";
 import { EnemyPositionContext, useEnemyPositionRef } from "../hooks/vrEnemyPosition";
+import { FistsContext, useFistsRef, type FistRefs } from "../hooks/vrFists";
+import { useJoyConContext } from "../contexts/JoyConContext";
 import VRBattleHUD from "./VRBattleHUD";
+import CreditsScene from "./CreditsScene";
+import { CREDIT_PUNCH_SFX_PATH, CREDIT_PUNCH_SFX_VOLUME } from "./credits";
 
 // 敵にダメージを与えるたびに鳴らす効果音。GameScene.tsxのBGM/SFXと同じ規約で、
 // このパスに音声ファイルを置けば自動的に再生される(未配置でも再生に失敗するだけで動作に影響しない)。
@@ -65,6 +69,11 @@ const GUARD_SUCCESS_SFX_VOLUME = 1;
 // 自分が被弾した瞬間に鳴らす効果音。
 const PLAYER_HIT_SFX_PATH = "/audio/maou_se_battle18.mp3";
 const PLAYER_HIT_SFX_VOLUME = 1;
+
+// DV撃破後のエンドロール(CreditsScene)で流すBGM。未配置なら無音になるだけ。
+// 殴打SFX(CREDIT_PUNCH_SFX_*)は VR/非VR 共通なので credits.ts からインポートしている。
+const ENDING_BGM_PATH = "/audio/maou_bgm_orchestra25.mp3";
+const ENDING_BGM_VOLUME = 0.5;
 
 // 被弾したかどうかが分かりづらい問題への対策。HPが減るほど視界の周辺が赤く
 // なるようにする(カメラに追従する球を内側から見せ、depthTestを切って常に
@@ -505,15 +514,29 @@ function createEnemy(): Enemy {
   return spawnEnemy(ENEMY_NEAR_POSITION.clone(), { maxHp: ENEMY_MAX_HP });
 }
 
+// grip-space原点(コントローラーを握る位置=握り拳あたり)のワールド座標を毎フレーム
+// 共有Refへ書き込む。エンドロール(CreditsScene)でクレジットを「殴る」当たり判定に使う。
+// 剣は右手だけだが殴るのは両手でできるようにしたいので、左右とも設置する。
+function FistTracker({ hand }: { hand: "left" | "right" }) {
+  const ref = useRef<Group>(null);
+  const fists = useFistsRef();
+  useFrame(() => {
+    if (ref.current) ref.current.getWorldPosition(fists[hand].current);
+  });
+  return <group ref={ref} name={`fist-${hand}`} />;
+}
+
 // コントローラーの見た目を差し替えるコンポーネント。既定ではtarget-ray-space
 // (ポインティング用の空間)に配置されるため、公式のXRControllerModelと同様に
 // grip-spaceへ貼り直す。
 function VRControllerVisual() {
   const controller = useXRInputSourceStateContext("controller");
-  if (controller.inputSource.handedness !== "right") return null;
+  const hand = controller.inputSource.handedness;
+  if (hand !== "left" && hand !== "right") return null;
   return (
     <XRSpace space="grip-space">
-      <VRLightsaber />
+      {hand === "right" && <VRLightsaber />}
+      <FistTracker hand={hand} />
     </XRSpace>
   );
 }
@@ -798,14 +821,29 @@ function VRGameLoop({
 
 export default function VRGameScene() {
   const navigate = useNavigate();
+  const joyCon = useJoyConContext();
   const store = useMemo(() => createXRStore({ controller: VRControllerVisual }), []);
   const saberTipRef = useRef(new Vector3());
   const saberBaseRef = useRef(new Vector3());
   const enemyHitboxSizeRef = useRef(new Vector3(0.9, MODEL_TARGET_HEIGHT, 0.6));
   const enemyPositionRef = useRef(ENEMY_NEAR_POSITION.clone());
+  const fistLeftRef = useRef(new Vector3());
+  const fistRightRef = useRef(new Vector3());
+  const fistRefs = useMemo<FistRefs>(
+    () => ({ left: fistLeftRef, right: fistRightRef }),
+    [],
+  );
   const enemyHitSfxRef = useRef<HTMLAudioElement>(null);
   const guardSuccessSfxRef = useRef<HTMLAudioElement>(null);
   const playerHitSfxRef = useRef<HTMLAudioElement>(null);
+  const endingBgmRef = useRef<HTMLAudioElement>(null);
+  const punchSfxRef = useRef<HTMLAudioElement>(null);
+
+  // "battle": ターン制バトル / "credits": DV撃破後のエンドロール。
+  // ルートは変えず同じCanvas/XRツリー内で描画するコンポーネントだけ差し替える
+  // (navigateするとXRセッションが切れ、ヘッドセットでVRを張り直す必要が出るため)。
+  const [mode, setMode] = useState<"battle" | "credits">("battle");
+  const [clearScore, setClearScore] = useState(0);
 
   function playEnemyHitSfx() {
     const audio = enemyHitSfxRef.current;
@@ -837,11 +875,46 @@ export default function VRGameScene() {
     });
   }
 
+  function playPunchSfx() {
+    const audio = punchSfxRef.current;
+    if (!audio) return;
+    audio.currentTime = 0;
+    audio.volume = CREDIT_PUNCH_SFX_VOLUME;
+    audio.play().catch(() => {});
+  }
+
+  function startEndingBgm() {
+    const audio = endingBgmRef.current;
+    if (!audio) return;
+    audio.currentTime = 0;
+    audio.volume = ENDING_BGM_VOLUME;
+    audio.loop = true;
+    audio.play().catch(() => {});
+  }
+
+  function stopEndingBgm() {
+    const audio = endingBgmRef.current;
+    if (!audio) return;
+    audio.pause();
+    audio.currentTime = 0;
+  }
+
+  // VRセッションを張ったままナビゲートすると、ヘッドセット側の表示がこのCanvasの
+  // 最終フレームで止まり /result のスコアが見えなくなる。先にセッションを終了して
+  // 通常の2D画面へ戻してから遷移する。
+  function goToResult(score: number, result: "clear" | "over") {
+    stopEndingBgm();
+    store.getState().session?.end();
+    navigate("/result", { state: { score, result } });
+  }
+
   return (
     <div className="relative w-full h-[70vh] min-h-[500px]">
       <audio ref={enemyHitSfxRef} src={ENEMY_HIT_SFX_PATH} preload="auto" />
       <audio ref={guardSuccessSfxRef} src={GUARD_SUCCESS_SFX_PATH} preload="auto" />
       <audio ref={playerHitSfxRef} src={PLAYER_HIT_SFX_PATH} preload="auto" />
+      <audio ref={endingBgmRef} src={ENDING_BGM_PATH} preload="auto" />
+      <audio ref={punchSfxRef} src={CREDIT_PUNCH_SFX_PATH} preload="auto" />
       <button
         type="button"
         onClick={() => {
@@ -859,22 +932,35 @@ export default function VRGameScene() {
           <SaberBaseContext.Provider value={saberBaseRef}>
             <EnemyHitboxSizeContext.Provider value={enemyHitboxSizeRef}>
               <EnemyPositionContext.Provider value={enemyPositionRef}>
-                <XR store={store}>
-                  <VRGameLoop
-                    onStateChange={() => {}}
-                    onEnemyHit={playEnemyHitSfx}
-                    onGuardSuccess={playGuardSuccessSfx}
-                    onPlayerHit={playPlayerHitSfx}
-                    onGameOver={(score, result) => {
-                      // VRセッションを張ったままナビゲートすると、ヘッドセット側の表示が
-                      // このCanvasの最終フレームで止まったままになり、/resultページの
-                      // スコア表示がヘッドセットから見えなくなる。先にセッションを終了させ、
-                      // 通常の2D画面に戻してから遷移する。
-                      store.getState().session?.end();
-                      navigate("/result", { state: { score, result } });
-                    }}
-                  />
-                </XR>
+                <FistsContext.Provider value={fistRefs}>
+                  <XR store={store}>
+                    {mode === "battle" ? (
+                      <VRGameLoop
+                        onStateChange={() => {}}
+                        onEnemyHit={playEnemyHitSfx}
+                        onGuardSuccess={playGuardSuccessSfx}
+                        onPlayerHit={playPlayerHitSfx}
+                        onGameOver={(score, result) => {
+                          if (result === "clear") {
+                            // DV撃破 → すぐ /result へ飛ばさず、エンドロールへ切り替える。
+                            setClearScore(score);
+                            startEndingBgm();
+                            setMode("credits");
+                            return;
+                          }
+                          goToResult(score, result);
+                        }}
+                      />
+                    ) : (
+                      <CreditsScene
+                        score={clearScore}
+                        joyConState={joyCon.state}
+                        onPunch={playPunchSfx}
+                        onFinish={() => goToResult(clearScore, "clear")}
+                      />
+                    )}
+                  </XR>
+                </FistsContext.Provider>
               </EnemyPositionContext.Provider>
             </EnemyHitboxSizeContext.Provider>
           </SaberBaseContext.Provider>
