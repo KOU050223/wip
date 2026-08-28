@@ -18,7 +18,7 @@ const BLADE_LOCAL_Y = BLADE_START + BLADE_LENGTH / 2;
 // ボールの色分け(赤=トリガー/青=グリップ)と対応させ、今どちらを押しているかが
 // 一目でわかるように刃の色を変える。両方同時押しはどちらの防御も成立しない
 // 状態なので、赤にも青にも見えない警告色(紫)にしてひと目で分かるようにする。
-const BLADE_COLOR_DEFAULT = "#4cc9f0";
+const BLADE_COLOR_DEFAULT = "#33ff66";
 const BLADE_COLOR_TRIGGER = "#ff3344";
 const BLADE_COLOR_GRIP = "#3388ff";
 const BLADE_COLOR_BOTH = "#aa44ff";
