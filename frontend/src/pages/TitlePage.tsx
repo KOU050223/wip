@@ -29,6 +29,12 @@ function TitlePage() {
         >
           通信対戦をはじめる
         </Link>
+        <Link
+          to="/ranking"
+          className="font-display px-10 py-3 border border-amber-400/50 text-amber-200 tracking-[0.3em] text-sm uppercase transition-colors hover:border-amber-300 hover:bg-amber-400/10 hover:text-white"
+        >
+          ランキング
+        </Link>
       </div>
     </section>
   );
