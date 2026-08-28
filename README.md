@@ -22,13 +22,25 @@ cp frontend/.env.example frontend/.env
 task dev
 ```
 
-`task dev` は Postgres（docker compose）を起動して healthy になるのを待ってから、バックエンドとフロントエンドを立ち上げます。
+`task dev` は PostgresとRedis（docker compose）を起動して healthy になるのを待ってから、バックエンドとフロントエンドを立ち上げます。LAN対戦のPose同期はローカルRedisを使うため、クラウドRedisを経由せず低遅延です。
 
 | URL | 内容 |
 | --- | --- |
 | http://localhost:5173 | フロントエンド（Vite） |
 | http://localhost:8080 | バックエンド（Gin） |
 | localhost:5432 | Postgres |
+
+## VR / PC リアルタイム対戦
+
+1. 2台のブラウザ（またはPCとVRヘッドセット）で `/matchmaking` を開き、両方で「ゲストで対戦開始」を選びます。
+2. マッチ成立後、両者が「対戦へ接続」→「準備する」を選ぶと、3秒後に開始します。
+3. PCは対戦画面の3Dエリア上でマウスを動かして剣を振り、VRは「VRで参加」から右手コントローラーで剣を振ります。相手アバターの身体に刃を振り抜いて3回当てると勝利です。
+
+VRとPCは同じWebSocket対戦ルームに参加でき、剣の根元・先端のPoseをリアルタイム同期します。PC操作はVR実機を使わないデバッグ参加者向けです。
+
+LAN上のQuest/PCから使う場合は、`https://192.168.1.155:5173` を開いて証明書警告を一度許可します。Viteが `/api` とWebSocketを `localhost:8080` のバックエンドへプロキシするため、HTTPS画面からHTTP APIへの混在コンテンツやCookieのCORS問題は発生しません。
+
+`backend/.env` の `GUEST_SESSION_COOKIE_SECURE=false` は、この自己署名証明書を使うLAN開発向けです。公開環境では削除または `true` に戻してください。
 
 DB だけを操作したい場合は次のタスクを使います。
 

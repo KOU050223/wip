@@ -11,7 +11,7 @@ import (
 )
 
 // defaultAllowOrigins はCORS_ALLOW_ORIGINSが未設定のときに使うローカル開発用オリジン。
-const defaultAllowOrigins = "http://localhost:3000,http://localhost:5173,https://localhost:5173"
+const defaultAllowOrigins = "http://localhost:3000,http://localhost:5173,https://localhost:5173,http://192.168.1.155:5173,https://192.168.1.155:5173"
 
 // AllowOrigins は環境変数CORS_ALLOW_ORIGINSをカンマ区切りで解釈して許可オリジンを返す。
 // 未設定の場合はローカル開発用のオリジンにフォールバックする。
@@ -31,6 +31,14 @@ func AllowOrigins() []string {
 	}
 
 	return origins
+}
+
+// GuestSessionCookieSecure reports whether the guest-session cookie must be
+// restricted to HTTPS. The secure production default can be explicitly
+// disabled only for HTTP LAN development where browsers would otherwise drop
+// a SameSite=None cookie before matchmaking can start.
+func GuestSessionCookieSecure() bool {
+	return !strings.EqualFold(strings.TrimSpace(os.Getenv("GUEST_SESSION_COOKIE_SECURE")), "false")
 }
 
 // CORSMiddleware は指定したオリジンを許可するCORSミドルウェアを生成する。

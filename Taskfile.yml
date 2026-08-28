@@ -29,6 +29,8 @@ tasks:
     # 接続する `task dev` では localhost を明示して上書きする。
     env:
       DATABASE_URL: postgres://wip:wip_password@localhost:5432/wip?sslmode=disable
+      # LAN対戦のPose同期はクラウドRedisを経由させず、同じPC上のRedisで中継する。
+      UPSTASH_REDIS_URL: redis://localhost:6379
     cmds:
       - go run ./cmd/server
 

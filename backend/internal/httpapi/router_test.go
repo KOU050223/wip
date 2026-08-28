@@ -273,6 +273,24 @@ func TestGuestSessionIssuesSignedCookieAndRejectsForgedPlayerID(t *testing.T) {
 	}
 }
 
+func TestGuestSessionUsesLaxInsecureCookieForHTTPLANDevelopment(t *testing.T) {
+	t.Setenv("GUEST_SESSION_COOKIE_SECURE", "false")
+	router := newMatchmakingTestRouter(&memoryQueue{})
+
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/api/guests", nil))
+	cookies := response.Result().Cookies()
+	if len(cookies) != 1 {
+		t.Fatalf("guest cookies = %#v, want one", cookies)
+	}
+	if cookies[0].Secure {
+		t.Fatal("LAN development cookie must not require HTTPS")
+	}
+	if cookies[0].SameSite != http.SameSiteLaxMode {
+		t.Fatalf("SameSite = %v, want Lax", cookies[0].SameSite)
+	}
+}
+
 func TestMatchmakingStatusDisablesCaching(t *testing.T) {
 	router := newMatchmakingTestRouter(&memoryQueue{})
 	response := httptest.NewRecorder()

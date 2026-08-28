@@ -10,15 +10,15 @@ import { useSaberTipRef } from "../../hooks/vrSaberTip";
 import { useSaberBaseRef } from "../../hooks/vrSaberBase";
 
 const HILT_LENGTH = 0.2;
-const BLADE_LENGTH = 1.2;
-const BLADE_START = HILT_LENGTH / 2; // 柄の先端(グリップ中心から見て前方の端、刃の根元)
-const BLADE_LOCAL_Y = BLADE_START + BLADE_LENGTH / 2;
+const DEFAULT_BLADE_LENGTH = 1.2;
 
-function VRLightsaber() {
+function VRLightsaber({ bladeLength = DEFAULT_BLADE_LENGTH }: { bladeLength?: number }) {
   const tipRef = useRef<Group>(null);
   const baseRef = useRef<Group>(null);
   const saberTip = useSaberTipRef();
   const saberBase = useSaberBaseRef();
+  const bladeStart = HILT_LENGTH / 2;
+  const bladeLocalY = bladeStart + bladeLength / 2;
 
   // 刃の根元・剣先の実座標を毎フレーム共有Refへ書き込む。
   // 当たり判定は剣先の点だけでなく、この2点を結ぶ刃全体の線分で行う(useVRSwingHit/ProjectileVisual)。
@@ -40,8 +40,8 @@ function VRLightsaber() {
         <cylinderGeometry args={[0.02, 0.02, HILT_LENGTH, 16]} />
         <meshStandardMaterial color="#888888" />
       </mesh>
-      <mesh position={[0, BLADE_LOCAL_Y, 0]}>
-        <cylinderGeometry args={[0.015, 0.015, BLADE_LENGTH, 16]} />
+      <mesh position={[0, bladeLocalY, 0]}>
+        <cylinderGeometry args={[0.015, 0.015, bladeLength, 16]} />
         <meshStandardMaterial
           color="#4cc9f0"
           emissive="#4cc9f0"
@@ -50,8 +50,8 @@ function VRLightsaber() {
         />
       </mesh>
       {/* 刃全体を線分として扱うための目印(根元・剣先)。useVRSwingHitがgetWorldPositionで参照する */}
-      <group ref={baseRef} position={[0, BLADE_START, 0]} name="saber-base" />
-      <group ref={tipRef} position={[0, BLADE_START + BLADE_LENGTH, 0]} name="saber-tip" />
+      <group ref={baseRef} position={[0, bladeStart, 0]} name="saber-base" />
+      <group ref={tipRef} position={[0, bladeStart + bladeLength, 0]} name="saber-tip" />
     </group>
   );
 }

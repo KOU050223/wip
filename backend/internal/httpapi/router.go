@@ -275,10 +275,15 @@ func (r *Router) websocketOriginAllowed(request *http.Request) bool {
 }
 
 func (r *Router) createGuest(c *gin.Context) {
-	c.SetSameSite(http.SameSiteNoneMode)
+	secureCookie := config.GuestSessionCookieSecure()
+	sameSite := http.SameSiteNoneMode
+	if !secureCookie {
+		sameSite = http.SameSiteLaxMode
+	}
+	c.SetSameSite(sameSite)
 	if token, err := c.Cookie(realtime.GuestSessionCookieName); err == nil {
 		if _, valid := r.guestSessions.PlayerID(token, time.Now()); valid {
-			c.SetCookie(realtime.GuestSessionCookieName, token, 24*60*60, "/", "", true, true)
+			c.SetCookie(realtime.GuestSessionCookieName, token, 24*60*60, "/", "", secureCookie, true)
 			c.Status(http.StatusCreated)
 			return
 		}
@@ -288,7 +293,7 @@ func (r *Router) createGuest(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create guest session"})
 		return
 	}
-	c.SetCookie(realtime.GuestSessionCookieName, token, 24*60*60, "/", "", true, true)
+	c.SetCookie(realtime.GuestSessionCookieName, token, 24*60*60, "/", "", secureCookie, true)
 	c.Status(http.StatusCreated)
 }
 
