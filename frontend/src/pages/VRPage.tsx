@@ -1,8 +1,12 @@
 import { useXRSessionModeSupported } from "@react-three/xr";
+import { useSearchParams } from "react-router-dom";
 import VRGameScene from "../game/VRGameScene";
+import { isDesktopVRDebug } from "../game/vrDebug";
 
 function VRPage() {
   const isSupported = useXRSessionModeSupported("immersive-vr");
+  const [searchParams] = useSearchParams();
+  const desktopDebug = isDesktopVRDebug(searchParams);
 
   return (
     <section className="min-h-screen flex flex-col items-center gap-6 px-6 py-10 text-center">
@@ -10,13 +14,19 @@ function VRPage() {
         VRモード
       </h1>
 
-      {isSupported === false && (
+      {isSupported === false && !desktopDebug && (
         <p className="text-amber-300">
           この端末・ブラウザはVR(WebXR)に対応していません。VR対応ヘッドセットのブラウザで開いてください。
         </p>
       )}
 
-      <VRGameScene />
+      {desktopDebug && (
+        <p className="text-emerald-300">
+          デスクトップデバッグ中: VRヘッドセットなしでHUDと誘惑表示を確認できます。
+        </p>
+      )}
+
+      <VRGameScene desktopDebug={desktopDebug} />
     </section>
   );
 }

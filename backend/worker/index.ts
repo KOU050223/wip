@@ -1,5 +1,6 @@
 import { Container, getRandom } from '@cloudflare/containers';
 import { env } from 'cloudflare:workers';
+import { createApp } from './app';
 
 const INSTANCE_COUNT = 2;
 export class BackendContainer extends Container {
@@ -25,9 +26,13 @@ export class BackendContainer extends Container {
   }
 }
 
+const app = createApp(async (request, env) => {
+  const container = await getRandom(env.BACKEND, INSTANCE_COUNT);
+  return container.fetch(request);
+});
+
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
-    const container = await getRandom(env.BACKEND, INSTANCE_COUNT);
-    return container.fetch(request);
+    return app.fetch(request, env);
   },
 } satisfies ExportedHandler<Env>;

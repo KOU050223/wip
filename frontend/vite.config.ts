@@ -10,5 +10,13 @@ export default defineConfig({
   // host:trueでLAN内のQuest実機からもアクセスできるようにする。
   server: {
     host: true,
+    // Workers AIを使うWorkerは、ローカルでは8787番で起動する。
+    // ブラウザからはViteと同一オリジンに見せ、LANのHTTPS画面でも安全に中継する。
+    proxy: {
+      "/ai": {
+        target: "http://127.0.0.1:8787",
+        changeOrigin: true,
+      },
+    },
   },
 });

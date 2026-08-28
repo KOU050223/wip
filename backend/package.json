@@ -11,10 +11,12 @@
     "cf-typegen": "wrangler types"
   },
   "dependencies": {
-    "@cloudflare/containers": "^0.3.7"
+    "@cloudflare/containers": "^0.3.7",
+    "hono": "^4.13.5"
   },
   "devDependencies": {
     "typescript": "~6.0.2",
+    "vitest": "^4.1.11",
     "wrangler": "^4.126.0"
   }
 }

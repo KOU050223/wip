@@ -10,9 +10,9 @@
 //   ボタンを押していないと被弾扱い(ミス確定)になる。
 // HUD(HP/コンボ/スコアの3Dパネル)はPhase 3で追加済み。BGM/SFXはPhase 4で追加する。
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Canvas, useFrame } from "@react-three/fiber";
+import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { Billboard, Text, useGLTF } from "@react-three/drei";
 import {
   createXRStore,
@@ -53,8 +53,21 @@ import {
   HITBOX_MARGIN,
 } from "../hooks/vrEnemyHitbox";
 import { EnemyPositionContext, useEnemyPositionRef } from "../hooks/vrEnemyPosition";
+import { FistsContext, useFistsRef, type FistRefs } from "../hooks/vrFists";
+import { useJoyConContext } from "../contexts/JoyConContext";
 import VRBattleHUD from "./VRBattleHUD";
+import CreditsScene from "./CreditsScene";
+import { CREDIT_PUNCH_SFX_PATH, CREDIT_PUNCH_SFX_VOLUME } from "./credits";
 import VRTutorial from "./VRTutorial";
+import { requestTaunt } from "./tauntClient";
+import {
+  pendingTauntForEnemy,
+  shouldDisplayTaunt,
+  shouldRequestTauntForEnemy,
+  tauntForEnemy,
+} from "./tauntVisibility";
+import { directionForKeyboardCode, guardColorForKeyboardCode } from "./vrKeyboardControls";
+import { desktopDebugCamera } from "./vrDebugCamera";
 
 // 敵にダメージを与えるたびに鳴らす効果音。GameScene.tsxのBGM/SFXと同じ規約で、
 // このパスに音声ファイルを置けば自動的に再生される(未配置でも再生に失敗するだけで動作に影響しない)。
@@ -68,6 +81,11 @@ const GUARD_SUCCESS_SFX_VOLUME = 1;
 // 自分が被弾した瞬間に鳴らす効果音。
 const PLAYER_HIT_SFX_PATH = "/audio/maou_se_battle18.mp3";
 const PLAYER_HIT_SFX_VOLUME = 1;
+
+// DV撃破後のエンドロール(CreditsScene)で流すBGM。未配置なら無音になるだけ。
+// 殴打SFX(CREDIT_PUNCH_SFX_*)は VR/非VR 共通なので credits.ts からインポートしている。
+const ENDING_BGM_PATH = "/audio/maou_bgm_orchestra25.mp3";
+const ENDING_BGM_VOLUME = 0.5;
 
 // 剣を振って(刃が敵のヒットボックスに入って)スイングが成立するたびに鳴らす効果音。
 // Joy-Con版のスイングSFXと同じファイルを流用する。
@@ -884,9 +902,13 @@ function EnemyMesh({ enemy, phase }: { enemy: Enemy; phase: BattlePhase }) {
 function ProjectileVisual({
   instance,
   onResolve,
+  desktopDebug,
+  isDesktopGuardPressed,
 }: {
   instance: ProjectileInstance;
   onResolve: (id: number, sliced: boolean) => void;
+  desktopDebug: boolean;
+  isDesktopGuardPressed: (color: ProjectileColor) => boolean;
 }) {
   const meshRef = useRef<Mesh>(null);
   const saberTip = useSaberTipRef();
@@ -914,6 +936,13 @@ function ProjectileVisual({
     // 進行度0→1に対してsin(πt)は0→1→0と山なりになるため、経路の中間で
     // curveAxis方向に最大まで膨らみ、最後はプレイヤーの正面へ収束する弓なりの軌道になる。
     mesh.position.addScaledVector(instance.curveAxis, Math.sin(t * Math.PI));
+
+    // デスクトップデバッグではVRコントローラーの剣位置を再現できないため、
+    // 到達直前にF/Gの色ガード入力で防御する簡易判定に切り替える。
+    if (desktopDebug && t >= 0.85) {
+      onResolve(instance.id, isDesktopGuardPressed(instance.color));
+      return;
+    }
 
     bladeLineRef.current.set(saberBase.current, saberTip.current);
     bladeLineRef.current.closestPointToPoint(mesh.position, true, closestPointRef.current);
@@ -984,15 +1013,40 @@ function BossAmbiance() {
   );
 }
 
+function DesktopDebugCamera() {
+  const { camera } = useThree();
+
+  useFrame(() => {
+    camera.position.set(...desktopDebugCamera.position);
+    camera.lookAt(...desktopDebugCamera.target);
+  });
+
+  return null;
+}
+
+// grip-space原点(コントローラーを握る位置=握り拳あたり)のワールド座標を毎フレーム
+// 共有Refへ書き込む。エンドロール(CreditsScene)でクレジットを「殴る」当たり判定に使う。
+// 剣は右手だけだが殴るのは両手でできるようにしたいので、左右とも設置する。
+function FistTracker({ hand }: { hand: "left" | "right" }) {
+  const ref = useRef<Group>(null);
+  const fists = useFistsRef();
+  useFrame(() => {
+    if (ref.current) ref.current.getWorldPosition(fists[hand].current);
+  });
+  return <group ref={ref} name={`fist-${hand}`} />;
+}
+
 // コントローラーの見た目を差し替えるコンポーネント。既定ではtarget-ray-space
 // (ポインティング用の空間)に配置されるため、公式のXRControllerModelと同様に
 // grip-spaceへ貼り直す。
 function VRControllerVisual() {
   const controller = useXRInputSourceStateContext("controller");
-  if (controller.inputSource.handedness !== "right") return null;
+  const hand = controller.inputSource.handedness;
+  if (hand !== "left" && hand !== "right") return null;
   return (
     <XRSpace space="grip-space">
-      <VRLightsaber />
+      {hand === "right" && <VRLightsaber />}
+      <FistTracker hand={hand} />
     </XRSpace>
   );
 }
@@ -1006,6 +1060,7 @@ function VRGameLoop({
   onSwing,
   onEnemyShoot,
   onBossAppear,
+  desktopDebug,
 }: {
   onStateChange: (enemy: Enemy, combo: ComboState, playerHp: number, phase: BattlePhase) => void;
   onGameOver: (score: number, result: "clear" | "over") => void;
@@ -1015,15 +1070,20 @@ function VRGameLoop({
   onSwing: () => void;
   onEnemyShoot: () => void;
   onBossAppear: () => void;
+  desktopDebug: boolean;
 }) {
   const [enemy, setEnemy] = useState<Enemy>(createEnemy);
   const [phase, setPhase] = useState<BattlePhase>("playerTurn");
   const [combo, setCombo] = useState<ComboState>(createInitialComboState());
   const [playerHp, setPlayerHp] = useState(PLAYER_MAX_HP);
   const [projectiles, setProjectiles] = useState<ProjectileInstance[]>([]);
+  const [taunt, setTaunt] = useState<{ enemyId: string; phrase: string } | null>(null);
   const enemyPosition = useEnemyPositionRef();
   const gameOverFiredRef = useRef(false);
   const projectileIdRef = useRef(0);
+  const tauntHistoryRef = useRef<string[]>([]);
+  const activeEnemyIdRef = useRef<string | null>(null);
+  const desktopGuardColorsRef = useRef(new Set<ProjectileColor>());
 
   // 1ウェーブ(同時に飛んでくる複数本)ぶんの決着待ち管理。
   // resolvedIdsRefは「このIDはもう斬った/被弾判定済み」の二重処理防止ガード、
@@ -1172,26 +1232,65 @@ function VRGameLoop({
     });
   }
 
+  const handleSwordStrike = useCallback(
+    (direction: SwingDirection) => {
+      if (phase !== "playerTurn" || enemy.state === "dying") return;
+      onSwing(); // 方向の正誤に関わらず、刃が敵のヒットボックスに入って振りが成立した時点で鳴らす
+      if (direction !== enemy.requiredDirection) return; // 方向違いは不発、ターンは継続
+
+      const damage = calculateDamage(1, PLAYER_ATTACK_DAMAGE); // VRにswingPowerの概念はないため固定値
+      const now = performance.now();
+      const hitEnemy = applyDamage(enemy, damage);
+      setEnemy(hitEnemy);
+      onEnemyHit();
+
+      setCombo((prev) => {
+        const next = registerHit(prev, now);
+        return { ...next, score: addScore(prev.score, next.combo) };
+      });
+
+      if (hitEnemy.hp > 0) {
+        setPhase("enemyTurn");
+      }
+    },
+    [enemy, onEnemyHit, onSwing, phase],
+  );
+
   // 自分のターン: 剣先が敵に当たった瞬間だけ呼ばれる(useVRSwingHit内でphase/敵状態を判定済み)
-  useVRSwingHit(enemy, phase, (direction) => {
-    onSwing(); // 方向の正誤に関わらず、刃が敵のヒットボックスに入って振りが成立した時点で鳴らす
-    if (direction !== enemy.requiredDirection) return; // 方向違いは不発、ターンは継続
+  useVRSwingHit(enemy, phase, handleSwordStrike);
 
-    const damage = calculateDamage(1, PLAYER_ATTACK_DAMAGE); // VRにswingPowerの概念はないため固定値
-    const now = performance.now();
-    const hitEnemy = applyDamage(enemy, damage);
-    setEnemy(hitEnemy);
-    onEnemyHit();
+  const isDesktopGuardPressed = useCallback(
+    (color: ProjectileColor) => desktopDebug && desktopGuardColorsRef.current.has(color),
+    [desktopDebug],
+  );
 
-    setCombo((prev) => {
-      const next = registerHit(prev, now);
-      return { ...next, score: addScore(prev.score, next.combo) };
-    });
-
-    if (hitEnemy.hp > 0) {
-      setPhase("enemyTurn");
-    }
-  });
+  useEffect(() => {
+    if (!desktopDebug) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      const direction = directionForKeyboardCode(event.code);
+      if (direction) {
+        event.preventDefault();
+        if (!event.repeat) handleSwordStrike(direction);
+        return;
+      }
+      const guardColor = guardColorForKeyboardCode(event.code);
+      if (guardColor) {
+        event.preventDefault();
+        desktopGuardColorsRef.current.add(guardColor);
+      }
+    };
+    const onKeyUp = (event: KeyboardEvent) => {
+      const guardColor = guardColorForKeyboardCode(event.code);
+      if (guardColor) desktopGuardColorsRef.current.delete(guardColor);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    window.addEventListener("keyup", onKeyUp);
+    return () => {
+      desktopGuardColorsRef.current.clear();
+      window.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener("keyup", onKeyUp);
+    };
+  }, [desktopDebug, handleSwordStrike]);
 
   // デバッグ用: 右手コントローラーのBボタンを押すと、通常戦を待たずにボスを即座に
   // 出現させる(ボス登場演出の確認用)。進行中のウェーブ/タイマーは全て破棄する。
@@ -1278,6 +1377,22 @@ function VRGameLoop({
     onStateChange(enemy, combo, playerHp, phase);
   }, [enemy, combo, playerHp, phase, onStateChange]);
 
+  useEffect(() => {
+    if (!shouldRequestTauntForEnemy(activeEnemyIdRef.current, enemy.id)) return;
+    activeEnemyIdRef.current = enemy.id;
+    setTaunt(pendingTauntForEnemy(enemy.id));
+    void requestTaunt({
+      trigger: "enemyAppeared",
+      playerHpPercent: (playerHp / PLAYER_MAX_HP) * 100,
+      isBoss: enemy.isBoss,
+      recentPhrases: tauntHistoryRef.current,
+    }).then((phrase) => {
+      if (!shouldDisplayTaunt(activeEnemyIdRef.current, enemy.id)) return;
+      tauntHistoryRef.current = [phrase, ...tauntHistoryRef.current].slice(0, 3);
+      setTaunt({ enemyId: enemy.id, phrase });
+    });
+  }, [enemy.id, enemy.isBoss, playerHp]);
+
   return (
     <>
       <HangarBackground />
@@ -1299,7 +1414,13 @@ function VRGameLoop({
       )}
       <EnemyMesh enemy={enemy} phase={phase} />
       {projectiles.map((instance) => (
-        <ProjectileVisual key={instance.id} instance={instance} onResolve={resolveProjectile} />
+        <ProjectileVisual
+          key={instance.id}
+          instance={instance}
+          onResolve={resolveProjectile}
+          desktopDebug={desktopDebug}
+          isDesktopGuardPressed={isDesktopGuardPressed}
+        />
       ))}
       <VRBattleHUD
         position={[HUD_ANCHOR_POSITION.x, HUD_ANCHOR_POSITION.y, HUD_ANCHOR_POSITION.z]}
@@ -1314,25 +1435,38 @@ function VRGameLoop({
         phase={phase}
         incoming={projectiles.length > 0}
         isBoss={enemy.isBoss}
+        taunt={tauntForEnemy(taunt, enemy.id)}
       />
     </>
   );
 }
 
-export default function VRGameScene() {
+export default function VRGameScene({ desktopDebug = false }: { desktopDebug?: boolean }) {
   const navigate = useNavigate();
+  const joyCon = useJoyConContext();
   const store = useMemo(() => createXRStore({ controller: VRControllerVisual }), []);
   const saberTipRef = useRef(new Vector3());
   const saberBaseRef = useRef(new Vector3());
   const enemyHitboxSizeRef = useRef(new Vector3(0.9, MODEL_TARGET_HEIGHT, 0.6));
   const enemyPositionRef = useRef(ENEMY_NEAR_POSITION.clone());
+  const fistLeftRef = useRef(new Vector3());
+  const fistRightRef = useRef(new Vector3());
+  const fistRefs = useMemo<FistRefs>(() => ({ left: fistLeftRef, right: fistRightRef }), []);
   const enemyHitSfxRef = useRef<HTMLAudioElement>(null);
   const guardSuccessSfxRef = useRef<HTMLAudioElement>(null);
   const playerHitSfxRef = useRef<HTMLAudioElement>(null);
+  const endingBgmRef = useRef<HTMLAudioElement>(null);
+  const punchSfxRef = useRef<HTMLAudioElement>(null);
   const swingSfxRef = useRef<HTMLAudioElement>(null);
   const enemyShootSfxRef = useRef<HTMLAudioElement>(null);
   const bossAppearSfxRef = useRef<HTMLAudioElement>(null);
   const [showTutorial, setShowTutorial] = useState(true);
+
+  // "battle": ターン制バトル / "credits": DV撃破後のエンドロール。
+  // ルートは変えず同じCanvas/XRツリー内で描画するコンポーネントだけ差し替える
+  // (navigateするとXRセッションが切れ、ヘッドセットでVRを張り直す必要が出るため)。
+  const [mode, setMode] = useState<"battle" | "credits">("battle");
+  const [clearScore, setClearScore] = useState(0);
 
   function playEnemyHitSfx() {
     const audio = enemyHitSfxRef.current;
@@ -1362,6 +1496,30 @@ export default function VRGameScene() {
     audio.play().catch(() => {
       // 音声ファイル未配置・自動再生ブロックなどは無視してよい
     });
+  }
+
+  function playPunchSfx() {
+    const audio = punchSfxRef.current;
+    if (!audio) return;
+    audio.currentTime = 0;
+    audio.volume = CREDIT_PUNCH_SFX_VOLUME;
+    audio.play().catch(() => {});
+  }
+
+  function startEndingBgm() {
+    const audio = endingBgmRef.current;
+    if (!audio) return;
+    audio.currentTime = 0;
+    audio.volume = ENDING_BGM_VOLUME;
+    audio.loop = true;
+    audio.play().catch(() => {});
+  }
+
+  function stopEndingBgm() {
+    const audio = endingBgmRef.current;
+    if (!audio) return;
+    audio.pause();
+    audio.currentTime = 0;
   }
 
   function playSwingSfx() {
@@ -1394,54 +1552,92 @@ export default function VRGameScene() {
     });
   }
 
+  // VRセッションを張ったままナビゲートすると、ヘッドセット側の表示がこのCanvasの
+  // 最終フレームで止まり /result のスコアが見えなくなる。先にセッションを終了して
+  // 通常の2D画面へ戻してから遷移する。
+  function goToResult(score: number, result: "clear" | "over") {
+    stopEndingBgm();
+    store.getState().session?.end();
+    navigate("/result", { state: { score, result } });
+  }
+
   return (
     <div className="relative w-full h-[70vh] min-h-[500px]">
       <audio ref={enemyHitSfxRef} src={ENEMY_HIT_SFX_PATH} preload="auto" />
       <audio ref={guardSuccessSfxRef} src={GUARD_SUCCESS_SFX_PATH} preload="auto" />
       <audio ref={playerHitSfxRef} src={PLAYER_HIT_SFX_PATH} preload="auto" />
+      <audio ref={endingBgmRef} src={ENDING_BGM_PATH} preload="auto" />
+      <audio ref={punchSfxRef} src={CREDIT_PUNCH_SFX_PATH} preload="auto" />
       <audio ref={swingSfxRef} src={SWING_SFX_PATH} preload="auto" />
       <audio ref={enemyShootSfxRef} src={ENEMY_SHOOT_SFX_PATH} preload="auto" />
       <audio ref={bossAppearSfxRef} src={BOSS_APPEAR_SFX_PATH} preload="auto" />
-      <button
-        type="button"
-        onClick={() => {
-          store.enterVR();
-        }}
-        className="font-display absolute top-4 left-1/2 z-10 -translate-x-1/2 border border-cyan-400/50 px-8 py-3 text-sm tracking-[0.3em] text-cyan-200 uppercase transition-colors hover:border-cyan-300 hover:bg-cyan-400/10 hover:text-white"
-      >
-        VRを開始
-      </button>
+      {desktopDebug ? (
+        <div className="font-display absolute top-4 left-1/2 z-10 -translate-x-1/2 border border-emerald-400/50 bg-slate-950/80 px-5 py-2 text-xs tracking-[0.2em] text-emerald-200">
+          DESKTOP VR DEBUG
+        </div>
+      ) : (
+        <button
+          type="button"
+          onClick={() => {
+            store.enterVR();
+          }}
+          className="font-display absolute top-4 left-1/2 z-10 -translate-x-1/2 border border-cyan-400/50 px-8 py-3 text-sm tracking-[0.3em] text-cyan-200 uppercase transition-colors hover:border-cyan-300 hover:bg-cyan-400/10 hover:text-white"
+        >
+          VRを開始
+        </button>
+      )}
+      {desktopDebug && (
+        <div className="absolute bottom-4 left-1/2 z-10 -translate-x-1/2 rounded border border-emerald-400/40 bg-slate-950/80 px-4 py-2 text-center text-xs text-emerald-100">
+          矢印キー / WASD: 方向斬り　F: 赤ガード　G: 青ガード
+        </div>
+      )}
       {/* gl.alpha未指定(既定true)だとcanvasのアルファ値が透ける前提になり、Quest 3等の
           パススルー対応ヘッドセットでは背景が不透明のはずのVRでも実際の部屋が透けて見えてしまう。
           alpha:falseで描画バッファを常に不透明にし、MR的な表示になるのを防ぐ。 */}
-      <Canvas camera={{ position: [0, 1.5, 2], fov: 75 }} gl={{ alpha: false }}>
+      <Canvas
+        camera={{ position: desktopDebug ? desktopDebugCamera.position : [0, 1.5, 2], fov: 75 }}
+        gl={{ alpha: false }}
+      >
         <SaberTipContext.Provider value={saberTipRef}>
           <SaberBaseContext.Provider value={saberBaseRef}>
             <EnemyHitboxSizeContext.Provider value={enemyHitboxSizeRef}>
               <EnemyPositionContext.Provider value={enemyPositionRef}>
-                <XR store={store}>
-                  {showTutorial ? (
-                    <VRTutorial onComplete={() => setShowTutorial(false)} />
-                  ) : (
-                    <VRGameLoop
-                      onStateChange={() => {}}
-                      onEnemyHit={playEnemyHitSfx}
-                      onGuardSuccess={playGuardSuccessSfx}
-                      onPlayerHit={playPlayerHitSfx}
-                      onSwing={playSwingSfx}
-                      onEnemyShoot={playEnemyShootSfx}
-                      onBossAppear={playBossAppearSfx}
-                      onGameOver={(score, result) => {
-                        // VRセッションを張ったままナビゲートすると、ヘッドセット側の表示が
-                        // このCanvasの最終フレームで止まったままになり、/resultページの
-                        // スコア表示がヘッドセットから見えなくなる。先にセッションを終了させ、
-                        // 通常の2D画面に戻してから遷移する。
-                        store.getState().session?.end();
-                        navigate("/result", { state: { score, result } });
-                      }}
-                    />
-                  )}
-                </XR>
+                <FistsContext.Provider value={fistRefs}>
+                  <XR store={store}>
+                    {desktopDebug && mode === "battle" && <DesktopDebugCamera />}
+                    {showTutorial && !desktopDebug ? (
+                      <VRTutorial onComplete={() => setShowTutorial(false)} />
+                    ) : mode === "battle" ? (
+                      <VRGameLoop
+                        onStateChange={() => {}}
+                        onEnemyHit={playEnemyHitSfx}
+                        onGuardSuccess={playGuardSuccessSfx}
+                        onPlayerHit={playPlayerHitSfx}
+                        onSwing={playSwingSfx}
+                        onEnemyShoot={playEnemyShootSfx}
+                        onBossAppear={playBossAppearSfx}
+                        desktopDebug={desktopDebug}
+                        onGameOver={(score, result) => {
+                          if (result === "clear") {
+                            // DV撃破 → すぐ /result へ飛ばさず、エンドロールへ切り替える。
+                            setClearScore(score);
+                            startEndingBgm();
+                            setMode("credits");
+                            return;
+                          }
+                          goToResult(score, result);
+                        }}
+                      />
+                    ) : (
+                      <CreditsScene
+                        score={clearScore}
+                        joyConState={joyCon.state}
+                        onPunch={playPunchSfx}
+                        onFinish={() => goToResult(clearScore, "clear")}
+                      />
+                    )}
+                  </XR>
+                </FistsContext.Provider>
               </EnemyPositionContext.Provider>
             </EnemyHitboxSizeContext.Provider>
           </SaberBaseContext.Provider>

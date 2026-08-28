@@ -20,6 +20,7 @@ tasks:
     internal: true
     deps:
       - dev:backend
+      - dev:ai-worker
       - dev:frontend
 
   dev:backend:
@@ -37,6 +38,12 @@ tasks:
     dir: frontend
     cmds:
       - npm run dev
+
+  dev:ai-worker:
+    internal: true
+    dir: backend
+    cmds:
+      - npm run dev -- --port 8787
 
   db:up:
     desc: ローカル開発用のPostgresを起動（healthyになるまで待つ）
