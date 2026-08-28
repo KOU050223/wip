@@ -21,7 +21,18 @@ import {
   useXRInputSourceState,
   useXRInputSourceStateContext,
 } from "@react-three/xr";
-import { Box3, DoubleSide, Group, Line3, Mesh, MeshStandardMaterial, Shape, Vector3 } from "three";
+import {
+  BackSide,
+  Box3,
+  DoubleSide,
+  Group,
+  Line3,
+  Mesh,
+  MeshBasicMaterial,
+  MeshStandardMaterial,
+  Shape,
+  Vector3,
+} from "three";
 import { clone as cloneSkeleton } from "three/examples/jsm/utils/SkeletonUtils.js";
 
 import type { Enemy, ComboState, SwingDirection, BattlePhase } from "./types";
@@ -41,6 +52,25 @@ import {
 } from "../hooks/vrEnemyHitbox";
 import { EnemyPositionContext, useEnemyPositionRef } from "../hooks/vrEnemyPosition";
 import VRBattleHUD from "./VRBattleHUD";
+
+// 敵にダメージを与えるたびに鳴らす効果音。GameScene.tsxのBGM/SFXと同じ規約で、
+// このパスに音声ファイルを置けば自動的に再生される(未配置でも再生に失敗するだけで動作に影響しない)。
+const ENEMY_HIT_SFX_PATH = "/audio/maou_se_battle_gun05.mp3";
+const ENEMY_HIT_SFX_VOLUME = 1;
+
+// ボールをガード成功した瞬間に鳴らす効果音。
+const GUARD_SUCCESS_SFX_PATH = "/audio/jast.wav";
+const GUARD_SUCCESS_SFX_VOLUME = 1;
+
+// 自分が被弾した瞬間に鳴らす効果音。
+const PLAYER_HIT_SFX_PATH = "/audio/maou_se_battle18.mp3";
+const PLAYER_HIT_SFX_VOLUME = 1;
+
+// 被弾したかどうかが分かりづらい問題への対策。HPが減るほど視界の周辺が赤く
+// なるようにする(カメラに追従する球を内側から見せ、depthTestを切って常に
+// 手前に描画することで、通常の画面オーバーレイの代わりにVRでも機能させる)。
+const LOW_HP_OVERLAY_RADIUS = 0.5;
+const LOW_HP_OVERLAY_MAX_OPACITY = 0.55;
 
 // Joy-Con版(GameScene.tsx)と揃えた数値。バランスは無変更で流用する。
 const ENEMY_NEAR_POSITION = new Vector3(0, 0, -2.5); // 自分のターン中、敵がいる位置(足元基準)
@@ -66,7 +96,7 @@ const TURN_COOLDOWN_MS = 300;
 // 敵が離れてポリゴンを飛ばす防御演出まわり
 const ENEMY_RETREAT_MS = 500; // 自分の攻撃直後、敵が離れきるまでの待ち時間(退避アニメの尺)
 const ENEMY_MOVE_LERP_SPEED = 4; // 敵の近寄る/離れるアニメーションの追従速度
-const PROJECTILE_HIT_RADIUS = 0.25; // 剣先がこの距離まで近づいたら斬れたとみなす
+const PROJECTILE_HIT_RADIUS = 0.4; // 剣先がこの距離まで近づいたら斬れたとみなす
 const PROJECTILE_SPAWN_Y = 1.4; // ポリゴンを飛ばす高さの目安
 
 // 単調にならないよう、1ウェーブごとに「本数(方向)」「速度」「軌道の曲がり方」を
@@ -246,6 +276,45 @@ function SpaceBackground() {
       <color attach="background" args={["#05050f"]} />
       <Stars radius={90} depth={60} count={4000} factor={4} saturation={0} fade speed={0.5} />
     </>
+  );
+}
+
+// HPが減るほど視界が赤くなる被弾フィードバック。通常の2Dゲームのような画面オーバーレイは
+// WebXRのヘッドセット映像には効かないため、カメラの位置・向きに毎フレーム追従する球を
+// カメラのすぐ内側(BackSide)に置き、depthTest/depthWriteを切って常に手前に描画することで
+// 疑似的なオーバーレイとして機能させる。
+function LowHpOverlay({ hpRatio }: { hpRatio: number }) {
+  const groupRef = useRef<Group>(null);
+  const materialRef = useRef<MeshBasicMaterial>(null);
+
+  useFrame((state) => {
+    const group = groupRef.current;
+    if (group) {
+      group.position.copy(state.camera.position);
+      group.quaternion.copy(state.camera.quaternion);
+    }
+    if (materialRef.current) {
+      const dangerRatio = Math.max(0, Math.min(1, 1 - hpRatio));
+      materialRef.current.opacity = dangerRatio * LOW_HP_OVERLAY_MAX_OPACITY;
+    }
+  });
+
+  return (
+    <group ref={groupRef}>
+      <mesh renderOrder={1000} frustumCulled={false}>
+        <sphereGeometry args={[LOW_HP_OVERLAY_RADIUS, 16, 16]} />
+        <meshBasicMaterial
+          ref={materialRef}
+          color="#ff0000"
+          transparent
+          opacity={0}
+          side={BackSide}
+          depthTest={false}
+          depthWrite={false}
+          toneMapped={false}
+        />
+      </mesh>
+    </group>
   );
 }
 
@@ -452,9 +521,15 @@ function VRControllerVisual() {
 function VRGameLoop({
   onStateChange,
   onGameOver,
+  onEnemyHit,
+  onGuardSuccess,
+  onPlayerHit,
 }: {
   onStateChange: (enemy: Enemy, combo: ComboState, playerHp: number, phase: BattlePhase) => void;
   onGameOver: (score: number, result: "clear" | "over") => void;
+  onEnemyHit: () => void;
+  onGuardSuccess: () => void;
+  onPlayerHit: () => void;
 }) {
   const [enemy, setEnemy] = useState<Enemy>(createEnemy);
   const [phase, setPhase] = useState<BattlePhase>("playerTurn");
@@ -557,7 +632,11 @@ function VRGameLoop({
       waveTimersRef.current.delete(id);
     }
     setProjectiles((prev) => prev.filter((p) => p.id !== id));
-    if (!sliced) waveMissCountRef.current += 1;
+    if (sliced) {
+      onGuardSuccess();
+    } else {
+      waveMissCountRef.current += 1;
+    }
 
     waveUnresolvedRef.current -= 1;
     if (waveUnresolvedRef.current <= 0) {
@@ -592,6 +671,7 @@ function VRGameLoop({
       return;
     }
 
+    onPlayerHit();
     setPlayerHp((hp) => {
       const nextHp = Math.max(0, hp - ENEMY_ATTACK_DAMAGE * missCount);
       if (nextHp <= 0) {
@@ -614,6 +694,7 @@ function VRGameLoop({
     const now = performance.now();
     const hitEnemy = applyDamage(enemy, damage);
     setEnemy(hitEnemy);
+    onEnemyHit();
 
     setCombo((prev) => {
       const next = registerHit(prev, now);
@@ -677,6 +758,7 @@ function VRGameLoop({
   return (
     <>
       <SpaceBackground />
+      <LowHpOverlay hpRatio={playerHp / PLAYER_MAX_HP} />
       {enemy.isBoss ? (
         <>
           {/* 赤系の雰囲気だけだと黒い鎧が背景に沈むため、正面からの白系キーライトと
@@ -721,9 +803,45 @@ export default function VRGameScene() {
   const saberBaseRef = useRef(new Vector3());
   const enemyHitboxSizeRef = useRef(new Vector3(0.9, MODEL_TARGET_HEIGHT, 0.6));
   const enemyPositionRef = useRef(ENEMY_NEAR_POSITION.clone());
+  const enemyHitSfxRef = useRef<HTMLAudioElement>(null);
+  const guardSuccessSfxRef = useRef<HTMLAudioElement>(null);
+  const playerHitSfxRef = useRef<HTMLAudioElement>(null);
+
+  function playEnemyHitSfx() {
+    const audio = enemyHitSfxRef.current;
+    if (!audio) return;
+    audio.currentTime = 0;
+    audio.volume = ENEMY_HIT_SFX_VOLUME;
+    audio.play().catch(() => {
+      // 音声ファイル未配置・自動再生ブロックなどは無視してよい
+    });
+  }
+
+  function playGuardSuccessSfx() {
+    const audio = guardSuccessSfxRef.current;
+    if (!audio) return;
+    audio.currentTime = 0;
+    audio.volume = GUARD_SUCCESS_SFX_VOLUME;
+    audio.play().catch(() => {
+      // 音声ファイル未配置・自動再生ブロックなどは無視してよい
+    });
+  }
+
+  function playPlayerHitSfx() {
+    const audio = playerHitSfxRef.current;
+    if (!audio) return;
+    audio.currentTime = 0;
+    audio.volume = PLAYER_HIT_SFX_VOLUME;
+    audio.play().catch(() => {
+      // 音声ファイル未配置・自動再生ブロックなどは無視してよい
+    });
+  }
 
   return (
     <div className="relative w-full h-[70vh] min-h-[500px]">
+      <audio ref={enemyHitSfxRef} src={ENEMY_HIT_SFX_PATH} preload="auto" />
+      <audio ref={guardSuccessSfxRef} src={GUARD_SUCCESS_SFX_PATH} preload="auto" />
+      <audio ref={playerHitSfxRef} src={PLAYER_HIT_SFX_PATH} preload="auto" />
       <button
         type="button"
         onClick={() => {
@@ -744,6 +862,9 @@ export default function VRGameScene() {
                 <XR store={store}>
                   <VRGameLoop
                     onStateChange={() => {}}
+                    onEnemyHit={playEnemyHitSfx}
+                    onGuardSuccess={playGuardSuccessSfx}
+                    onPlayerHit={playPlayerHitSfx}
                     onGameOver={(score, result) => {
                       // VRセッションを張ったままナビゲートすると、ヘッドセット側の表示が
                       // このCanvasの最終フレームで止まったままになり、/resultページの
