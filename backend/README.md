@@ -137,6 +137,24 @@ task dev:backend:container     # Worker＋コンテナをローカルで起動
 
 `main` への push で自動デプロイされるため、通常は手動実行は不要。
 
+## Workers AI 音声生成
+
+`POST /ai/speech` に日本語テキストを送ると、Workers AI の
+`@cf/myshell-ai/melotts` を使って WAV 音声を返す。
+
+```bash
+curl -X POST https://api.uomi.dev/ai/speech \
+  -H 'Content-Type: application/json' \
+  -d '{"text":"こんにちは。Workers AIで生成した音声です。"}' \
+  --output speech.mp3
+```
+
+ローカルでAI推論を確認する際は、Cloudflare上の推論を使うため以下を実行する。
+
+```bash
+npm run dev -- --remote
+```
+
 ## 目的
 
 - ゲームのスコアを保存する

@@ -57,6 +57,7 @@ import VRBattleHUD from "./VRBattleHUD";
 import CreditsScene from "./CreditsScene";
 import { CREDIT_PUNCH_SFX_PATH, CREDIT_PUNCH_SFX_VOLUME } from "./credits";
 import VRTutorial from "./VRTutorial";
+import { requestSpeech } from "./speechClient";
 import { requestTaunt } from "./tauntClient";
 import {
   pendingTauntForEnemy,
@@ -588,6 +589,7 @@ function VRGameLoop({
   onPlayerHit,
   onSwing,
   onEnemyShoot,
+  onTauntSpoken,
   desktopDebug,
 }: {
   onStateChange: (enemy: Enemy, combo: ComboState, playerHp: number, phase: BattlePhase) => void;
@@ -597,6 +599,7 @@ function VRGameLoop({
   onPlayerHit: () => void;
   onSwing: () => void;
   onEnemyShoot: () => void;
+  onTauntSpoken: (phrase: string) => void;
   desktopDebug: boolean;
 }) {
   const [enemy, setEnemy] = useState<Enemy>(createEnemy);
@@ -881,8 +884,9 @@ function VRGameLoop({
       if (!shouldDisplayTaunt(activeEnemyIdRef.current, enemy.id)) return;
       tauntHistoryRef.current = [phrase, ...tauntHistoryRef.current].slice(0, 3);
       setTaunt({ enemyId: enemy.id, phrase });
+      onTauntSpoken(phrase);
     });
-  }, [enemy.id, enemy.isBoss, playerHp]);
+  }, [enemy.id, enemy.isBoss, onTauntSpoken, playerHp]);
 
   return (
     <>
@@ -950,6 +954,8 @@ export default function VRGameScene({ desktopDebug = false }: { desktopDebug?: b
   const punchSfxRef = useRef<HTMLAudioElement>(null);
   const swingSfxRef = useRef<HTMLAudioElement>(null);
   const enemyShootSfxRef = useRef<HTMLAudioElement>(null);
+  const tauntSpeechRef = useRef<HTMLAudioElement>(null);
+  const tauntSpeechUrlRef = useRef<string | null>(null);
   const [showTutorial, setShowTutorial] = useState(true);
 
   // "battle": ターン制バトル / "credits": DV撃破後のエンドロール。
@@ -1032,6 +1038,29 @@ export default function VRGameScene({ desktopDebug = false }: { desktopDebug?: b
     });
   }
 
+  function playTauntSpeech(phrase: string) {
+    void requestSpeech(phrase).then((audioBlob) => {
+      const audio = tauntSpeechRef.current;
+      if (!audioBlob || !audio) return;
+
+      if (tauntSpeechUrlRef.current) URL.revokeObjectURL(tauntSpeechUrlRef.current);
+      const url = URL.createObjectURL(audioBlob);
+      tauntSpeechUrlRef.current = url;
+      audio.src = url;
+      audio.currentTime = 0;
+      audio.volume = 0.8;
+      audio.play().catch(() => {
+        // ブラウザの自動再生制限や推論失敗時もゲーム進行は止めない。
+      });
+    });
+  }
+
+  useEffect(() => {
+    return () => {
+      if (tauntSpeechUrlRef.current) URL.revokeObjectURL(tauntSpeechUrlRef.current);
+    };
+  }, []);
+
   // VRセッションを張ったままナビゲートすると、ヘッドセット側の表示がこのCanvasの
   // 最終フレームで止まり /result のスコアが見えなくなる。先にセッションを終了して
   // 通常の2D画面へ戻してから遷移する。
@@ -1050,6 +1079,7 @@ export default function VRGameScene({ desktopDebug = false }: { desktopDebug?: b
       <audio ref={punchSfxRef} src={CREDIT_PUNCH_SFX_PATH} preload="auto" />
       <audio ref={swingSfxRef} src={SWING_SFX_PATH} preload="auto" />
       <audio ref={enemyShootSfxRef} src={ENEMY_SHOOT_SFX_PATH} preload="auto" />
+      <audio ref={tauntSpeechRef} preload="none" />
       {desktopDebug ? (
         <div className="font-display absolute top-4 left-1/2 z-10 -translate-x-1/2 border border-emerald-400/50 bg-slate-950/80 px-5 py-2 text-xs tracking-[0.2em] text-emerald-200">
           DESKTOP VR DEBUG
@@ -1094,6 +1124,7 @@ export default function VRGameScene({ desktopDebug = false }: { desktopDebug?: b
                         onPlayerHit={playPlayerHitSfx}
                         onSwing={playSwingSfx}
                         onEnemyShoot={playEnemyShootSfx}
+                        onTauntSpoken={playTauntSpeech}
                         desktopDebug={desktopDebug}
                         onGameOver={(score, result) => {
                           if (result === "clear") {

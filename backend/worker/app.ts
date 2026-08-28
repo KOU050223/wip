@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 
+import { createSpeech } from "./speech";
 import { createTaunt } from "./taunt";
 
 type FetchContainer = (request: Request, env: Env) => Promise<Response>;
@@ -27,6 +28,7 @@ export function createApp(fetchContainer: FetchContainer) {
   // preflightをContainerへ流さずここで終端する。
   app.options("/ai/*", (c) => c.body(null, 204));
   app.post("/ai/taunt", (c) => createTaunt(c.req.raw, c.env.AI));
+  app.post("/ai/speech", (c) => createSpeech(c.req.raw, c.env.AI));
   
   // /ai/* 以外のリクエストは、コンテナに転送する
   app.all("*", (c) => fetchContainer(c.req.raw, c.env));
