@@ -5,6 +5,10 @@
   "compatibility_date": "2026-08-27",
   "compatibility_flags": ["nodejs_compat"],
 
+  "ai": {
+    "binding": "AI",
+  },
+
   // Preview URL は workers.dev のサブドメインで配信されるため、両方を明示的に有効化する。
   "workers_dev": true,
   "preview_urls": true,
