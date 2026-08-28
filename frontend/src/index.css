@@ -77,6 +77,42 @@ body {
   animation: title-flicker 1.2s ease-out both;
 }
 
+/* タイトル画面用: 金の輪郭と黒い塗りで、クラシックな宇宙活劇ロゴの印象を作る */
+.title-logo {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  color: #05050a;
+  font-family: "Arial Black", "Hiragino Kaku Gothic ProN", sans-serif;
+  font-size: clamp(3.25rem, 10vw, 8.5rem);
+  font-weight: 900;
+  letter-spacing: 0.04em;
+  line-height: 0.88;
+  text-shadow:
+    0 0 3px #f6c64d,
+    0 0 18px rgba(245, 186, 45, 0.25);
+  -webkit-text-stroke: clamp(2px, 0.35vw, 6px) #efb735;
+  paint-order: stroke fill;
+  transform: perspective(700px) rotateX(7deg);
+}
+
+.title-logo span {
+  display: block;
+  white-space: nowrap;
+}
+
+.title-logo span:first-child {
+  transform: translateX(-0.035em);
+}
+
+.title-logo span:last-child {
+  transform: translateX(0.035em);
+}
+
+.title-logo--bold-outline {
+  -webkit-text-stroke-width: clamp(9px, 0.55vw, 21px);
+}
+
 /* ボスの攻撃を受けた時・出現時の画面シェイク */
 @keyframes screen-shake {
   0%,

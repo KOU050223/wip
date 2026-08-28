@@ -7,6 +7,7 @@ import MatchRoomPage from "./pages/MatchRoomPage";
 import RankingPage from "./pages/RankingPage";
 import ResultPage from "./pages/ResultPage";
 import TitlePage from "./pages/TitlePage";
+import TutorialPage from "./pages/TutorialPage";
 import VRPage from "./pages/VRPage";
 
 function App() {
@@ -17,6 +18,7 @@ function App() {
         <Route path="/connect" element={<ConnectPage />} />
         <Route path="/matchmaking" element={<MatchmakingPage />} />
         <Route path="/matches/:matchID" element={<MatchRoomPage />} />
+        <Route path="/tutorial" element={<TutorialPage />} />
         <Route path="/game" element={<GamePage />} />
         <Route path="/vr" element={<VRPage />} />
         <Route path="/result" element={<ResultPage />} />
