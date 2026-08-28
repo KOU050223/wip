@@ -24,6 +24,7 @@ type BattleHUDProps = {
   phase: BattlePhase;
   defenseButton: DefenseButton;
   isBoss?: boolean;
+  taunt?: string;
 };
 
 function HudCorner({ className, isBoss }: { className: string; isBoss: boolean }) {
@@ -45,6 +46,7 @@ export default function BattleHUD({
   phase,
   defenseButton,
   isBoss = false,
+  taunt = "",
 }: BattleHUDProps) {
   const hpPercent = Math.round((hp / maxHp) * 100);
   const enemyHpPercent = Math.round((enemyHp / enemyMaxHp) * 100);
@@ -106,6 +108,16 @@ export default function BattleHUD({
         >
           {phase === "playerTurn" ? "YOUR TURN" : "ENEMY TURN"}
         </div>
+        {taunt && (
+          <div
+            aria-live="polite"
+            className={`max-w-md text-center text-lg tracking-wide drop-shadow-[0_0_12px_rgba(0,0,0,0.9)] ${
+              isBoss ? "text-red-200" : "text-purple-200"
+            }`}
+          >
+            「{taunt}」
+          </div>
+        )}
         {phase === "playerTurn" && combo > 0 && (
           <div className="text-center">
             <div className="text-6xl font-extrabold tracking-tight text-amber-300 italic drop-shadow-[0_0_12px_rgba(252,211,77,0.5)]">
