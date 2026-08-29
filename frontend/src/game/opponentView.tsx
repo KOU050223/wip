@@ -129,6 +129,9 @@ export function OpponentViewAvatar() {
 
   useEffect(() => {
     groupRef.current?.traverse((object) => object.layers.set(OPPONENT_VIEW_LAYER));
+    // 剣はgroupの外に置くため、traverseの対象外。個別にレイヤーを設定しないと
+    // 敵の観測カメラに映らなくなる。
+    saberRef.current?.layers.set(OPPONENT_VIEW_LAYER);
   }, []);
 
   useFrame(() => {
@@ -151,13 +154,17 @@ export function OpponentViewAvatar() {
   });
 
   return (
-    <group ref={groupRef} name="opponent-view-player">
-      <primitive object={stormtrooper} />
+    <>
+      <group ref={groupRef} name="opponent-view-player">
+        <primitive object={stormtrooper} />
+      </group>
+      {/* saberBase/saberTipはワールド座標。移動・回転済みのgroup配下に置くと
+          groupの変換が二重に適用されるため、groupの兄弟として配置する。 */}
       <mesh ref={saberRef}>
         <cylinderGeometry args={[0.018, 0.018, 1, 8]} />
         <meshBasicMaterial color="#39ff76" toneMapped={false} />
       </mesh>
-    </group>
+    </>
   );
 }
 

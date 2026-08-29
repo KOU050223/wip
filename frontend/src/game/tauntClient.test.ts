@@ -1,8 +1,18 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { requestTaunt } from "./tauntClient";
+import { requestTaunt, resolveTauntEndpoint } from "./tauntClient";
 
 describe("requestTaunt", () => {
+  it("uses the configured API host when the frontend is deployed separately", () => {
+    expect(resolveTauntEndpoint("https://api.example.com")).toBe(
+      "https://api.example.com/ai/taunt",
+    );
+  });
+
+  it("uses the same-origin proxy when no API host is configured", () => {
+    expect(resolveTauntEndpoint()).toBe("/ai/taunt");
+  });
+
   it("sends the enemy's view of the player to the AI endpoint and returns its phrase", async () => {
     const fetchImplementation = vi
       .fn()

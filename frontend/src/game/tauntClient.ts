@@ -9,9 +9,14 @@ export type TauntContext = {
 type TauntResponse = { phrase?: unknown };
 
 const FALLBACK_PHRASE = "がんばりすぎだよぉ。少しだけ、ここで休んでいきな？";
-// 開発時はViteが /ai をWorkers AI (8787) へ中継する。環境変数のAPIホストを使うと
-// LAN上の別IPを直接参照してしまい、HTTPSのVR画面から台詞生成だけが失敗する。
-const AI_ENDPOINT = "/ai/taunt";
+const TAUNT_PATH = "/ai/taunt";
+
+// 開発時はAPIホスト未設定のため、Viteが同一オリジンの /ai を Workers AI (8787) へ中継する。
+// 本番はフロントとバックエンドが別Workerなので、設定されたAPIホストへ送らないと
+// 静的フロントのSPA HTMLをJSONとして読んでしまい、常にフォールバック台詞になる。
+export function resolveTauntEndpoint(apiBaseURL?: string): string {
+  return apiBaseURL ? new URL(TAUNT_PATH, apiBaseURL).toString() : TAUNT_PATH;
+}
 
 function normalizePhrase(value: string): string {
   const phrase = value.trim();
@@ -26,9 +31,10 @@ function logTaunt(phrase: string): string {
 export async function requestTaunt(
   context: TauntContext,
   fetchImplementation: typeof fetch = fetch,
+  endpoint: string = TAUNT_PATH,
 ): Promise<string> {
   try {
-    const response = await fetchImplementation(AI_ENDPOINT, {
+    const response = await fetchImplementation(endpoint, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(context),
