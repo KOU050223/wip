@@ -3,13 +3,19 @@ import { Link, useLocation } from "react-router-dom";
 import { useSaveScore } from "../api/generated/scores/scores";
 import { createResultScoreSubmission } from "./resultScoreSubmission";
 
-type ResultLocationState = { score?: number; result?: "clear" | "over" };
+type ResultLocationState = {
+  score?: number;
+  result?: "clear" | "over";
+  // 再挑戦ボタンの遷移先。VRからのリザルトは "/vr"、未指定(Joy-Con)は "/game"。
+  retryTo?: string;
+};
 
 function ResultPage() {
   const location = useLocation();
   const state = location.state as ResultLocationState | null;
   const score = state?.score;
   const isClear = state?.result === "clear";
+  const retryTo = state?.retryTo ?? "/game";
   const [playerName, setPlayerName] = useState("");
   const saveScoreMutation = useSaveScore();
   const resultScore = score ?? 0;
@@ -68,7 +74,7 @@ function ResultPage() {
       </form>
       <div className="flex flex-col gap-4 sm:flex-row">
         <Link
-          to="/game"
+          to={retryTo}
           className="font-display px-10 py-3 border border-cyan-400/50 text-cyan-200 tracking-[0.3em] text-sm uppercase transition-colors hover:border-cyan-300 hover:bg-cyan-400/10 hover:text-white"
         >
           もう一度挑戦

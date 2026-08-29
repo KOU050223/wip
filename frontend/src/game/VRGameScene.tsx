@@ -1558,7 +1558,10 @@ export default function VRGameScene({ desktopDebug = false }: { desktopDebug?: b
   function goToResult(score: number, result: "clear" | "over") {
     stopEndingBgm();
     store.getState().session?.end();
-    navigate("/result", { state: { score, result } });
+    // 再挑戦でVR画面へ戻せるよう mode を持たせる。デスクトップデバッグ中はクエリも引き継ぐ。
+    navigate("/result", {
+      state: { score, result, retryTo: desktopDebug ? "/vr?debug=1" : "/vr" },
+    });
   }
 
   return (
