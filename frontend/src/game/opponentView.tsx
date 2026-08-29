@@ -33,7 +33,10 @@ function pixelsToDataURL(pixels: Uint8Array): string {
   const imageData = context.createImageData(OBSERVATION_SIZE, OBSERVATION_SIZE);
   for (let y = 0; y < OBSERVATION_SIZE; y += 1) {
     const sourceStart = (OBSERVATION_SIZE - y - 1) * OBSERVATION_SIZE * 4;
-    imageData.data.set(pixels.subarray(sourceStart, sourceStart + OBSERVATION_SIZE * 4), y * OBSERVATION_SIZE * 4);
+    imageData.data.set(
+      pixels.subarray(sourceStart, sourceStart + OBSERVATION_SIZE * 4),
+      y * OBSERVATION_SIZE * 4,
+    );
   }
   context.putImageData(imageData, 0, 0);
   return canvas.toDataURL("image/jpeg", 0.72);
@@ -51,7 +54,11 @@ export function OpponentViewCapture({
   const { camera: playerCamera, gl, scene } = useThree();
   const pendingKeyRef = useRef<string | null>(captureKey);
   const target = useMemo(
-    () => new WebGLRenderTarget(OBSERVATION_SIZE, OBSERVATION_SIZE, { format: RGBAFormat, type: UnsignedByteType }),
+    () =>
+      new WebGLRenderTarget(OBSERVATION_SIZE, OBSERVATION_SIZE, {
+        format: RGBAFormat,
+        type: UnsignedByteType,
+      }),
     [],
   );
   const opponentCamera = useMemo(() => new PerspectiveCamera(62, 1, 0.1, 30), []);

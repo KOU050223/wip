@@ -69,6 +69,7 @@ import {
 import { directionForKeyboardCode, guardColorForKeyboardCode } from "./vrKeyboardControls";
 import { desktopDebugCamera } from "./vrDebugCamera";
 import { OpponentViewAvatar, OpponentViewCapture } from "./opponentView";
+import { EnemySpeechBubble } from "./EnemySpeechBubble";
 
 // 敵にダメージを与えるたびに鳴らす効果音。GameScene.tsxのBGM/SFXと同じ規約で、
 // このパスに音声ファイルを置けば自動的に再生される(未配置でも再生に失敗するだけで動作に影響しない)。
@@ -863,7 +864,7 @@ function EnemyHitboxDebugBox({ visible }: { visible: boolean }) {
 // (HP変化などで)頻繁に再生成されるたびにアニメーション中の位置が巻き戻ってしまうため、
 // 初期配置(新しい敵が出た瞬間)だけenemy.idをキーに一度スナップし、
 // それ以降はuseFrameで近い/遠いをアニメーションさせる完全に命令的な制御にする。
-function EnemyMesh({ enemy, phase }: { enemy: Enemy; phase: BattlePhase }) {
+function EnemyMesh({ enemy, phase, taunt }: { enemy: Enemy; phase: BattlePhase; taunt: string }) {
   const groupRef = useRef<Group>(null);
   const enemyPosition = useEnemyPositionRef();
 
@@ -888,6 +889,7 @@ function EnemyMesh({ enemy, phase }: { enemy: Enemy; phase: BattlePhase }) {
       <EnemyModel modelPath={enemy.modelPath} state={enemy.state} />
       <EnemyHitboxDebugBox visible={phase === "playerTurn" && enemy.state !== "dying"} />
       {enemy.state !== "dying" && <DirectionArrowIndicator direction={enemy.requiredDirection} />}
+      <EnemySpeechBubble phrase={taunt} isBoss={enemy.isBoss} />
     </group>
   );
 }
@@ -1431,7 +1433,7 @@ function VRGameLoop({
           <BossEntranceTitle key={`title-${enemy.id}`} />
         </>
       )}
-      <EnemyMesh enemy={enemy} phase={phase} />
+      <EnemyMesh enemy={enemy} phase={phase} taunt={tauntForEnemy(taunt, enemy.id)} />
       <OpponentViewAvatar />
       <OpponentViewCapture
         captureKey={enemy.id}
@@ -1460,7 +1462,6 @@ function VRGameLoop({
         phase={phase}
         incoming={projectiles.length > 0}
         isBoss={enemy.isBoss}
-        taunt={tauntForEnemy(taunt, enemy.id)}
       />
     </>
   );

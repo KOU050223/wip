@@ -65,7 +65,9 @@ describe("requestTaunt", () => {
     const log = vi.spyOn(console, "log").mockImplementation(() => {});
     const fetchImplementation = vi
       .fn()
-      .mockResolvedValue(new Response(JSON.stringify({ phrase: "鎧が眩しいね。" }), { status: 200 }));
+      .mockResolvedValue(
+        new Response(JSON.stringify({ phrase: "鎧が眩しいね。" }), { status: 200 }),
+      );
 
     await requestTaunt(
       { trigger: "enemyAppeared", playerHpPercent: 50, isBoss: false },

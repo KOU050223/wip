@@ -48,6 +48,17 @@ describe("buildMessages", () => {
     expect(messages[0]?.content).toContain("辛い現実を忘れたくなる");
     expect(messages[1]?.content).toContain("眠りへ誘う休息の約束");
   });
+
+  it("gives the masked boss a breathing, threatening voice instead of a cute temptation", () => {
+    const messages = buildMessages(
+      { trigger: "enemyAppeared", playerHpPercent: 40, isBoss: true },
+      "眠りへ誘う休息の約束",
+    );
+
+    expect(messages[0]?.content).toContain("しゅこーーー");
+    expect(messages[0]?.content).toContain("可愛い誘惑");
+    expect(messages[1]?.content).toContain("ボス専用");
+  });
 });
 
 describe("createVisionTauntRequest", () => {
