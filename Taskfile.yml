@@ -60,6 +60,26 @@ tasks:
     cmds:
       - docker compose down -v
 
+  swagger:
+    desc: Goのアノテーションから backend/docs のOpenAPI定義を再生成
+    dir: backend
+    cmds:
+      # swagコマンドの未インストール環境でも動くよう go run で実行する。
+      # バージョンは backend/go.mod の github.com/swaggo/swag と揃えること。
+      - go run github.com/swaggo/swag/cmd/swag@v1.16.6 init -g cmd/server/main.go -o docs
+
+  generate:api:
+    desc: OpenAPI定義とフロントエンドのAPI Hooksをまとめて再生成
+    cmds:
+      - task: swagger
+      - task: generate:api:client
+
+  generate:api:client:
+    internal: true
+    dir: frontend
+    cmds:
+      - npm run generate:api
+
   deploy:frontend:
     desc: フロントエンドをCloudflare Workersの本番へデプロイ
     dir: frontend
