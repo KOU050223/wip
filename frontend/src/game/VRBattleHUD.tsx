@@ -7,8 +7,8 @@
 import { Text } from "@react-three/drei";
 import type { BattlePhase } from "./types";
 
-const PANEL_WIDTH = 0.9;
-const PANEL_HEIGHT = 0.9;
+const PANEL_WIDTH = 1.15;
+const PANEL_HEIGHT = 1.35;
 const BAR_WIDTH = 0.7;
 const BAR_HEIGHT = 0.05;
 
@@ -43,7 +43,6 @@ function VRBattleHUD({
   phase,
   incoming,
   isBoss,
-  taunt,
 }: {
   position: [number, number, number];
   rotationY: number;
@@ -57,7 +56,6 @@ function VRBattleHUD({
   phase: BattlePhase;
   incoming: boolean;
   isBoss: boolean;
-  taunt: string;
 }) {
   const turnLabel =
     phase === "playerTurn" ? "YOUR TURN" : incoming ? "INCOMING! SLICE IT!" : "ENEMY TURN";
@@ -129,20 +127,6 @@ function VRBattleHUD({
       >
         {`COMBO ${combo}  SCORE ${score}`}
       </Text>
-
-      {taunt && (
-        <Text
-          position={[0, -0.38, 0]}
-          fontSize={0.038}
-          maxWidth={0.78}
-          lineHeight={1.2}
-          color={isBoss ? "#ffb3c1" : "#e9b8ff"}
-          anchorX="center"
-          anchorY="middle"
-        >
-          {`「${taunt}」`}
-        </Text>
-      )}
     </group>
   );
 }

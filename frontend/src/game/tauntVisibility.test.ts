@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  isNewerTauntResponse,
   pendingTauntForEnemy,
   shouldDisplayTaunt,
   shouldRequestTauntForEnemy,
@@ -35,5 +36,23 @@ describe("shouldDisplayTaunt", () => {
       enemyId: "enemy-2",
       phrase: "ふふっ、少しだけ、ここにいてよ？",
     });
+  });
+});
+
+describe("isNewerTauntResponse", () => {
+  it("accepts the first response because nothing is displayed yet", () => {
+    expect(isNewerTauntResponse(0, 1)).toBe(true);
+  });
+
+  it("lets the Vision response replace the normal phrase already displayed", () => {
+    expect(isNewerTauntResponse(1, 2)).toBe(true);
+  });
+
+  it("rejects a normal response that arrives after the Vision phrase is displayed", () => {
+    expect(isNewerTauntResponse(2, 1)).toBe(false);
+  });
+
+  it("rejects a response that is already displayed", () => {
+    expect(isNewerTauntResponse(2, 2)).toBe(false);
   });
 });

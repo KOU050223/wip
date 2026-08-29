@@ -59,15 +59,21 @@ import VRBattleHUD from "./VRBattleHUD";
 import CreditsScene from "./CreditsScene";
 import { CREDIT_PUNCH_SFX_PATH, CREDIT_PUNCH_SFX_VOLUME } from "./credits";
 import VRTutorial from "./VRTutorial";
-import { requestTaunt } from "./tauntClient";
+import { requestTaunt, resolveTauntEndpoint } from "./tauntClient";
 import {
+  isNewerTauntResponse,
   pendingTauntForEnemy,
   shouldDisplayTaunt,
   shouldRequestTauntForEnemy,
   tauntForEnemy,
 } from "./tauntVisibility";
 import { directionForKeyboardCode, guardColorForKeyboardCode } from "./vrKeyboardControls";
+
+// APIホストはビルド時に埋め込まれる。未設定の開発環境ではViteの /ai プロキシへ流す。
+const TAUNT_ENDPOINT = resolveTauntEndpoint(import.meta.env.VITE_API_BASE_URL);
 import { desktopDebugCamera } from "./vrDebugCamera";
+import { OpponentViewAvatar, OpponentViewCapture } from "./opponentView";
+import { EnemySpeechBubble } from "./EnemySpeechBubble";
 
 // 敵にダメージを与えるたびに鳴らす効果音。GameScene.tsxのBGM/SFXと同じ規約で、
 // このパスに音声ファイルを置けば自動的に再生される(未配置でも再生に失敗するだけで動作に影響しない)。
@@ -862,7 +868,7 @@ function EnemyHitboxDebugBox({ visible }: { visible: boolean }) {
 // (HP変化などで)頻繁に再生成されるたびにアニメーション中の位置が巻き戻ってしまうため、
 // 初期配置(新しい敵が出た瞬間)だけenemy.idをキーに一度スナップし、
 // それ以降はuseFrameで近い/遠いをアニメーションさせる完全に命令的な制御にする。
-function EnemyMesh({ enemy, phase }: { enemy: Enemy; phase: BattlePhase }) {
+function EnemyMesh({ enemy, phase, taunt }: { enemy: Enemy; phase: BattlePhase; taunt: string }) {
   const groupRef = useRef<Group>(null);
   const enemyPosition = useEnemyPositionRef();
 
@@ -887,6 +893,7 @@ function EnemyMesh({ enemy, phase }: { enemy: Enemy; phase: BattlePhase }) {
       <EnemyModel modelPath={enemy.modelPath} state={enemy.state} />
       <EnemyHitboxDebugBox visible={phase === "playerTurn" && enemy.state !== "dying"} />
       {enemy.state !== "dying" && <DirectionArrowIndicator direction={enemy.requiredDirection} />}
+      <EnemySpeechBubble phrase={taunt} isBoss={enemy.isBoss} />
     </group>
   );
 }
@@ -1078,11 +1085,19 @@ function VRGameLoop({
   const [playerHp, setPlayerHp] = useState(PLAYER_MAX_HP);
   const [projectiles, setProjectiles] = useState<ProjectileInstance[]>([]);
   const [taunt, setTaunt] = useState<{ enemyId: string; phrase: string } | null>(null);
+  const [opponentView, setOpponentView] = useState<{ enemyId: string; image: string } | null>(null);
   const enemyPosition = useEnemyPositionRef();
   const gameOverFiredRef = useRef(false);
   const projectileIdRef = useRef(0);
   const tauntHistoryRef = useRef<string[]>([]);
   const activeEnemyIdRef = useRef<string | null>(null);
+  // 通常要求とVision要求は並行して走るため、世代で新旧を判定して古い応答を捨てる。
+  const tauntGenerationRef = useRef(0);
+  const displayedTauntGenerationRef = useRef(0);
+  // Vision要求は有料なので、同じ一枚につき一度だけ投げる。
+  const visionRequestedKeyRef = useRef<string | null>(null);
+  const playerHpRef = useRef(playerHp);
+  playerHpRef.current = playerHp;
   const desktopGuardColorsRef = useRef(new Set<ProjectileColor>());
 
   // 1ウェーブ(同時に飛んでくる複数本)ぶんの決着待ち管理。
@@ -1380,18 +1395,52 @@ function VRGameLoop({
   useEffect(() => {
     if (!shouldRequestTauntForEnemy(activeEnemyIdRef.current, enemy.id)) return;
     activeEnemyIdRef.current = enemy.id;
+    displayedTauntGenerationRef.current = 0;
     setTaunt(pendingTauntForEnemy(enemy.id));
-    void requestTaunt({
-      trigger: "enemyAppeared",
-      playerHpPercent: (playerHp / PLAYER_MAX_HP) * 100,
-      isBoss: enemy.isBoss,
-      recentPhrases: tauntHistoryRef.current,
-    }).then((phrase) => {
+    const generation = (tauntGenerationRef.current += 1);
+    void requestTaunt(
+      {
+        trigger: "enemyAppeared",
+        playerHpPercent: (playerHpRef.current / PLAYER_MAX_HP) * 100,
+        isBoss: enemy.isBoss,
+        recentPhrases: tauntHistoryRef.current,
+      },
+      fetch,
+      TAUNT_ENDPOINT,
+    ).then((phrase) => {
       if (!shouldDisplayTaunt(activeEnemyIdRef.current, enemy.id)) return;
+      if (!isNewerTauntResponse(displayedTauntGenerationRef.current, generation)) return;
+      displayedTauntGenerationRef.current = generation;
       tauntHistoryRef.current = [phrase, ...tauntHistoryRef.current].slice(0, 3);
       setTaunt({ enemyId: enemy.id, phrase });
     });
-  }, [enemy.id, enemy.isBoss, playerHp]);
+  }, [enemy.id, enemy.isBoss]);
+
+  // 敵の目線で撮った一枚が届いたら、最初の台詞をVisionによる観測ベースの台詞へ差し替える。
+  // 観測失敗時は先に出した通常台詞が残るため、戦闘の開始を待たせない。
+  useEffect(() => {
+    if (opponentView?.enemyId !== enemy.id) return;
+    if (visionRequestedKeyRef.current === enemy.id) return;
+    visionRequestedKeyRef.current = enemy.id;
+    const generation = (tauntGenerationRef.current += 1);
+    void requestTaunt(
+      {
+        trigger: "enemyAppeared",
+        playerHpPercent: (playerHpRef.current / PLAYER_MAX_HP) * 100,
+        isBoss: enemy.isBoss,
+        recentPhrases: tauntHistoryRef.current,
+        opponentView: opponentView.image,
+      },
+      fetch,
+      TAUNT_ENDPOINT,
+    ).then((phrase) => {
+      if (!shouldDisplayTaunt(activeEnemyIdRef.current, enemy.id)) return;
+      if (!isNewerTauntResponse(displayedTauntGenerationRef.current, generation)) return;
+      displayedTauntGenerationRef.current = generation;
+      tauntHistoryRef.current = [phrase, ...tauntHistoryRef.current].slice(0, 3);
+      setTaunt({ enemyId: enemy.id, phrase });
+    });
+  }, [enemy.id, enemy.isBoss, opponentView]);
 
   return (
     <>
@@ -1412,7 +1461,13 @@ function VRGameLoop({
           <BossEntranceTitle key={`title-${enemy.id}`} />
         </>
       )}
-      <EnemyMesh enemy={enemy} phase={phase} />
+      <EnemyMesh enemy={enemy} phase={phase} taunt={tauntForEnemy(taunt, enemy.id)} />
+      <OpponentViewAvatar />
+      <OpponentViewCapture
+        captureKey={enemy.id}
+        enemyPosition={enemyPosition.current}
+        onCapture={(image) => setOpponentView({ enemyId: enemy.id, image })}
+      />
       {projectiles.map((instance) => (
         <ProjectileVisual
           key={instance.id}
@@ -1435,7 +1490,6 @@ function VRGameLoop({
         phase={phase}
         incoming={projectiles.length > 0}
         isBoss={enemy.isBoss}
-        taunt={tauntForEnemy(taunt, enemy.id)}
       />
     </>
   );

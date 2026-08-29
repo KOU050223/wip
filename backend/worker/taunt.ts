@@ -5,6 +5,7 @@ type TauntContext = {
   playerHpPercent: number;
   isBoss: boolean;
   recentPhrases?: string[];
+  opponentView?: string;
 };
 
 type AiResponse = {
@@ -41,6 +42,10 @@ function isTauntContext(value: unknown): value is TauntContext {
     typeof context.playerHpPercent === "number" &&
     Number.isFinite(context.playerHpPercent) &&
     typeof context.isBoss === "boolean" &&
+    (context.opponentView === undefined ||
+      (typeof context.opponentView === "string" &&
+        context.opponentView.startsWith("data:image/") &&
+        context.opponentView.length <= 700_000)) &&
     (context.recentPhrases === undefined ||
       (Array.isArray(context.recentPhrases) &&
         context.recentPhrases.length <= 3 &&
@@ -60,6 +65,13 @@ export function extractPhrase(response: AiResponse): string {
   return sanitizePhrase(response.choices?.[0]?.message?.content);
 }
 
+function systemPrompt(isBoss: boolean): string {
+  if (isBoss) {
+    return "あなたは近未来剣戟ゲームの、マスクを付けた圧倒的な最後の敵。台詞は必ず呼吸音「しゅこーーー……」で始め、低く短く威圧的に話す。可愛い誘惑、♥、甘いお菓子、ふわふわ、眠りへの誘いは使わない。プレイヤーの鎧・剣・構えを観察し、降伏、恐怖、力、運命について語る。台詞だけを1、2文、60文字以内で返す。出力に「」や引用符を含めない。";
+  }
+  return "あなたは近未来剣戟ゲームの成人の小悪魔的な敵。被弾や弱さを煽る台詞ではない。プレイヤーが辛い現実を忘れたくなるよう、休息、楽しい遊び、ご褒美、安心できる居場所など、魅力的な逃避先を可愛く提案する。提案はゲーム世界の演出であり、現実の金銭、個人情報、実在サービスへの誘導はしない。台詞だけを1、2文、60文字以内で返す。ひらがな・〜は可愛さのアクセントとして使ってよいが、各一つまで。♥は最大一つ。性的な表現、身体への言及、未成年を示唆する表現、現実の人格否定は使わない。出力に「」や引用符を含めない。";
+}
+
 export function buildMessages(context: TauntContext, style: string) {
   const recentPhrases = context.recentPhrases?.length
     ? `直近の台詞: ${context.recentPhrases.map((phrase) => `「${phrase}」`).join("、")}`
@@ -67,14 +79,23 @@ export function buildMessages(context: TauntContext, style: string) {
   return [
     {
       role: "system" as const,
-      content:
-        "あなたは近未来剣戟ゲームの成人の小悪魔的な敵。被弾や弱さを煽る台詞ではない。プレイヤーが辛い現実を忘れたくなるよう、休息、楽しい遊び、ご褒美、安心できる居場所など、魅力的な逃避先を可愛く提案する。提案はゲーム世界の演出であり、現実の金銭、個人情報、実在サービスへの誘導はしない。台詞だけを1、2文、60文字以内で返す。ひらがな・〜は可愛さのアクセントとして使ってよいが、各一つまで。♥は最大一つ。性的な表現、身体への言及、未成年を示唆する表現、現実の人格否定は使わない。出力に「」や引用符を含めない。",
+      content: systemPrompt(context.isBoss),
     },
     {
       role: "user" as const,
-      content: `状況: ${context.isBoss ? "ボス" : "通常の敵"}が出現した。今回の誘惑: ${style}。${recentPhrases}。直近の台詞と同じ書き出し・単語・比喩・語尾は使わず、言い換えも避ける。`,
+      content: `状況: ${context.isBoss ? "ボス専用の最後の敵" : "通常の敵"}が出現した。${context.isBoss ? "呼吸音から始め、観測した姿へ威圧的に語りかける。" : `今回の誘惑: ${style}。`}${recentPhrases}。${context.opponentView ? "添付画像は敵の視点から見たプレイヤー。観測内容を台詞の主役にする。最初に、画像で確認できる鎧、ライトセーバー、構え、距離のいずれか一つを具体名で言及し、敵がそれをどう解釈したかを添える。" : ""}直近の台詞と同じ書き出し・単語・比喩・語尾は使わず、言い換えも避ける。`,
     },
   ];
+}
+
+export function createVisionTauntRequest(context: TauntContext) {
+  return {
+    messages: buildMessages(context, chooseTauntStyle()),
+    ...(context.opponentView ? { image: context.opponentView } : {}),
+    max_tokens: 80,
+    temperature: 0.9,
+    chat_template_kwargs: { enable_thinking: false },
+  };
 }
 
 function chooseTauntStyle(): string {
@@ -92,12 +113,7 @@ export async function createTaunt(request: Request, ai: Ai): Promise<Response> {
     return Response.json({ error: "invalid taunt context" }, { status: 400 });
   }
 
-  const response = (await ai.run(MODEL, {
-    messages: buildMessages(context, chooseTauntStyle()),
-    max_tokens: 80,
-    temperature: 0.9,
-    chat_template_kwargs: { enable_thinking: false },
-  }, gatewayOptions())) as AiResponse;
+  const response = (await ai.run(MODEL, createVisionTauntRequest(context), gatewayOptions())) as AiResponse;
 
   return Response.json({ phrase: extractPhrase(response) });
 }
