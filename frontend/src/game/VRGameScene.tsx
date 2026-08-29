@@ -68,6 +68,7 @@ import {
 } from "./tauntVisibility";
 import { directionForKeyboardCode, guardColorForKeyboardCode } from "./vrKeyboardControls";
 import { desktopDebugCamera } from "./vrDebugCamera";
+import { OpponentViewAvatar, OpponentViewCapture } from "./opponentView";
 
 // 敵にダメージを与えるたびに鳴らす効果音。GameScene.tsxのBGM/SFXと同じ規約で、
 // このパスに音声ファイルを置けば自動的に再生される(未配置でも再生に失敗するだけで動作に影響しない)。
@@ -1078,6 +1079,7 @@ function VRGameLoop({
   const [playerHp, setPlayerHp] = useState(PLAYER_MAX_HP);
   const [projectiles, setProjectiles] = useState<ProjectileInstance[]>([]);
   const [taunt, setTaunt] = useState<{ enemyId: string; phrase: string } | null>(null);
+  const [opponentView, setOpponentView] = useState<{ enemyId: string; image: string } | null>(null);
   const enemyPosition = useEnemyPositionRef();
   const gameOverFiredRef = useRef(false);
   const projectileIdRef = useRef(0);
@@ -1393,6 +1395,23 @@ function VRGameLoop({
     });
   }, [enemy.id, enemy.isBoss, playerHp]);
 
+  // 敵の目線で撮った一枚が届いたら、最初の台詞をVisionによる観測ベースの台詞へ差し替える。
+  // 観測失敗時は先に出した通常台詞が残るため、戦闘の開始を待たせない。
+  useEffect(() => {
+    if (opponentView?.enemyId !== enemy.id) return;
+    void requestTaunt({
+      trigger: "enemyAppeared",
+      playerHpPercent: (playerHp / PLAYER_MAX_HP) * 100,
+      isBoss: enemy.isBoss,
+      recentPhrases: tauntHistoryRef.current,
+      opponentView: opponentView.image,
+    }).then((phrase) => {
+      if (!shouldDisplayTaunt(activeEnemyIdRef.current, enemy.id)) return;
+      tauntHistoryRef.current = [phrase, ...tauntHistoryRef.current].slice(0, 3);
+      setTaunt({ enemyId: enemy.id, phrase });
+    });
+  }, [enemy.id, enemy.isBoss, opponentView, playerHp]);
+
   return (
     <>
       <HangarBackground />
@@ -1413,6 +1432,12 @@ function VRGameLoop({
         </>
       )}
       <EnemyMesh enemy={enemy} phase={phase} />
+      <OpponentViewAvatar />
+      <OpponentViewCapture
+        captureKey={enemy.id}
+        enemyPosition={enemyPosition.current}
+        onCapture={(image) => setOpponentView({ enemyId: enemy.id, image })}
+      />
       {projectiles.map((instance) => (
         <ProjectileVisual
           key={instance.id}

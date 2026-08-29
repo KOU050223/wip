@@ -5,6 +5,7 @@ type TauntContext = {
   playerHpPercent: number;
   isBoss: boolean;
   recentPhrases?: string[];
+  opponentView?: string;
 };
 
 type AiResponse = {
@@ -41,6 +42,10 @@ function isTauntContext(value: unknown): value is TauntContext {
     typeof context.playerHpPercent === "number" &&
     Number.isFinite(context.playerHpPercent) &&
     typeof context.isBoss === "boolean" &&
+    (context.opponentView === undefined ||
+      (typeof context.opponentView === "string" &&
+        context.opponentView.startsWith("data:image/") &&
+        context.opponentView.length <= 700_000)) &&
     (context.recentPhrases === undefined ||
       (Array.isArray(context.recentPhrases) &&
         context.recentPhrases.length <= 3 &&
@@ -72,9 +77,19 @@ export function buildMessages(context: TauntContext, style: string) {
     },
     {
       role: "user" as const,
-      content: `状況: ${context.isBoss ? "ボス" : "通常の敵"}が出現した。今回の誘惑: ${style}。${recentPhrases}。直近の台詞と同じ書き出し・単語・比喩・語尾は使わず、言い換えも避ける。`,
+      content: `状況: ${context.isBoss ? "ボス" : "通常の敵"}が出現した。今回の誘惑: ${style}。${recentPhrases}。${context.opponentView ? "添付画像は敵の視点から見たプレイヤー。観測内容を台詞の主役にする。最初に、画像で確認できる鎧、ライトセーバー、構え、距離のいずれか一つを具体名で言及し、敵がそれをどう解釈したかを添える。その観測から自然に誘惑へつなげる。観測と無関係な夢・お菓子・休息だけの汎用台詞は禁止。見えない事実を断定しない。" : ""}直近の台詞と同じ書き出し・単語・比喩・語尾は使わず、言い換えも避ける。`,
     },
   ];
+}
+
+export function createVisionTauntRequest(context: TauntContext) {
+  return {
+    messages: buildMessages(context, chooseTauntStyle()),
+    ...(context.opponentView ? { image: context.opponentView } : {}),
+    max_tokens: 80,
+    temperature: 0.9,
+    chat_template_kwargs: { enable_thinking: false },
+  };
 }
 
 function chooseTauntStyle(): string {
@@ -92,12 +107,7 @@ export async function createTaunt(request: Request, ai: Ai): Promise<Response> {
     return Response.json({ error: "invalid taunt context" }, { status: 400 });
   }
 
-  const response = (await ai.run(MODEL, {
-    messages: buildMessages(context, chooseTauntStyle()),
-    max_tokens: 80,
-    temperature: 0.9,
-    chat_template_kwargs: { enable_thinking: false },
-  }, gatewayOptions())) as AiResponse;
+  const response = (await ai.run(MODEL, createVisionTauntRequest(context), gatewayOptions())) as AiResponse;
 
   return Response.json({ phrase: extractPhrase(response) });
 }
