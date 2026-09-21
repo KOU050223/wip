@@ -5,47 +5,41 @@
   "compatibility_date": "2026-08-27",
   "compatibility_flags": ["nodejs_compat"],
 
+  // Go を js/wasm にビルドし、worker/index.ts が読み込む build/worker.mjs を生成する。
+  "build": {
+    "command": "npm run build:go",
+  },
+
   "ai": {
     "binding": "AI",
   },
 
-  // Preview URL は workers.dev のサブドメインで配信されるため、両方を明示的に有効化する。
+  // API はフロントエンドから呼ばれるだけでユーザーが直接開くものではないため、
+  // カスタムドメインは設定せず workers.dev のURLで配信する。
   "workers_dev": true,
   "preview_urls": true,
-  "routes": [{ "pattern": "api.uomi.dev", "custom_domain": true }],
 
-  "containers": [
-    {
-      "class_name": "BackendContainer",
-      "image": "./Dockerfile",
-      // lite（256MiB）は Gin + GORM + pgx にはやや窮屈なため basic を使う。
-      "instance_type": "basic",
-      // worker/index.ts の INSTANCE_COUNT 以上にすること。
-      "max_instances": 2,
-    },
-  ],
-
-  "durable_objects": {
-    "bindings": [
-      {
-        "name": "BACKEND",
-        "class_name": "BackendContainer",
-      },
-    ],
+  // Go 側へ渡す非機密の設定値。
+  // DATABASE_URL は機密なので vars ではなく `wrangler secret put` で登録する。
+  "vars": {
+    // `https://*.uozumi05.workers.dev` は Workers のプレビューURL
+    // （`<ハッシュ>-wip-frontend.uozumi05.workers.dev`）を受けるための指定。
+    // デプロイごとにホスト名が変わるため列挙では追随できない。
+    "CORS_ALLOW_ORIGINS": "https://wip-frontend.uomi.dev,https://wip-frontend.uozumi05.workers.dev,https://*.uozumi05.workers.dev",
   },
 
+  // Containers から Workers へ移行したため、コンテナ用の Durable Object を破棄する。
+  // v1 は適用済みのため、履歴として残したうえで v2 で削除する。
   "migrations": [
     {
       "tag": "v1",
       "new_sqlite_classes": ["BackendContainer"],
     },
+    {
+      "tag": "v2",
+      "deleted_classes": ["BackendContainer"],
+    },
   ],
-
-  // コンテナへ中継する非機密の設定値。
-  // DATABASE_URL は機密なので vars ではなく `wrangler secret put` で登録する。
-  "vars": {
-    "CORS_ALLOW_ORIGINS": "https://wip-frontend.uomi.dev,https://wip-frontend.uozumi05.workers.dev",
-  },
 
   "observability": {
     "enabled": true,

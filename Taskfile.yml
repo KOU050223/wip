@@ -10,40 +10,25 @@ tasks:
     silent: true
 
   dev:
-    desc: Postgres・バックエンド・フロントエンドをまとめて起動
-    cmds:
-      # バックエンドはDB未接続だと起動時に落ちるため、healthyになるまで待つ。
-      - task: db:up
-      - task: dev:servers
-
-  dev:servers:
-    internal: true
+    desc: バックエンド（Worker）とフロントエンドを起動
     deps:
       - dev:backend
-      - dev:ai-worker
       - dev:frontend
 
   dev:backend:
     internal: true
     dir: backend
-    # `backend/.env` はコンテナ実行にも使うため、ホストからComposeのPostgresへ
-    # 接続する `task dev` では localhost を明示して上書きする。
-    env:
-      DATABASE_URL: postgres://wip:wip_password@localhost:5432/wip?sslmode=disable
+    # Go は Wasm にビルドして Worker 上で動くため、wrangler dev で起動する。
+    # 接続先は backend/.dev.vars で指定する。connect() は localhost に到達できないため、
+    # ローカルの Postgres ではなくマネージドPostgresを指定すること。
     cmds:
-      - go run ./cmd/server
+      - npm run dev -- --port 8787
 
   dev:frontend:
     internal: true
     dir: frontend
     cmds:
       - npm run dev
-
-  dev:ai-worker:
-    internal: true
-    dir: backend
-    cmds:
-      - npm run dev -- --port 8787
 
   db:up:
     desc: ローカル開発用のPostgresを起動（healthyになるまで待つ）
@@ -93,16 +78,16 @@ tasks:
       - npm run deploy:preview
 
   deploy:backend:
-    desc: バックエンドをCloudflare Containersの本番へデプロイ（Docker起動が必要）
+    desc: バックエンドをCloudflare Workersの本番へデプロイ
     dir: backend
     cmds:
       - npm run deploy
 
-  dev:backend:container:
-    desc: Worker＋コンテナをローカルで起動して本番構成を再現（Docker起動が必要）
+  db:migrate:
+    desc: GORMのAutoMigrateでスキーマを適用（DATABASE_URL を指定して実行する）
     dir: backend
     cmds:
-      - npm run dev
+      - go run ./cmd/migrate
 
   ci:
     desc: GitHub Actions と同じ品質チェックを実行

@@ -9,16 +9,13 @@ on:
       - '.github/workflows/deploy-backend.yml'
   workflow_dispatch:
 
-# 同一ブランチへの連続プッシュでイメージのビルド・ロールアウトが競合しないよう直列化する。
+# 同一ブランチへの連続プッシュでロールアウトが競合しないよう直列化する。
 # 本番デプロイの中断は避けたいのでキャンセルはしない。
 concurrency:
   group: deploy-backend-${{ github.ref }}
   cancel-in-progress: false
 
 # フロントエンドと違い、PRでのプレビューデプロイは用意していない。
-# Containers Worker は Durable Object を持つため Preview URL が発行されず、
-# `wrangler versions upload` はコンテナイメージの publish もロールアウトも行わないため。
-# https://developers.cloudflare.com/containers/deploy/
 jobs:
   deploy:
     name: Production deploy
@@ -32,10 +29,14 @@ jobs:
           node-version: 24
           cache: npm
           cache-dependency-path: backend/package-lock.json
+      # wrangler の build フックが Go を js/wasm にビルドするため Go が必要。
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.27.x'
+          cache-dependency-path: backend/go.sum
       - run: npm ci
         working-directory: backend
 
-      # コンテナイメージのビルドには Docker が必要だが、ubuntu-latest には同梱されている。
       - name: Deploy to production
         id: deploy
         uses: cloudflare/wrangler-action@9acf94ace14e7dc412b076f2c5c20b8ce93c79cd # v3.15.0

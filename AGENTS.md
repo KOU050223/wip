@@ -10,8 +10,8 @@
 | パス | 内容 |
 | --- | --- |
 | `frontend/` | React SPA（Vite）。Cloudflare Workers へデプロイ |
-| `backend/cmd`, `backend/internal` | Go の API サーバー（Gin + GORM + PostgreSQL）。Cloudflare Containers へデプロイ |
-| `backend/worker` | Cloudflare Worker（Hono）。コンテナへのルーティングと Workers AI を担当 |
+| `backend/cmd`, `backend/internal` | Go の API サーバー（Gin + GORM + PostgreSQL）。js/wasm にビルドして Cloudflare Workers へデプロイ |
+| `backend/worker` | Cloudflare Worker（Hono）。Go/Wasm へのルーティングと Workers AI を担当 |
 | `docs/` | 設計・デプロイ手順 |
 
 Go 側のアーキテクチャはレイヤードです。
@@ -34,16 +34,17 @@ PostgreSQL
 - **frontend**: React 19 / Vite 8 / react-router-dom 7 / TanStack Query 5 /
   three + `@react-three/fiber` `@react-three/drei` `@react-three/xr` / Tailwind CSS v4 /
   Vitest 4 / TypeScript 6
-- **backend（Go）**: Go 1.27 / Gin / GORM / PostgreSQL 17 / Redis（マッチメイキング）
-- **backend（Worker）**: Hono 4 / `@cloudflare/containers` / wrangler 4
+- **backend（Go）**: Go 1.27 / Gin / GORM / PostgreSQL（Neon）/ syumai/workers-go
+- **backend（Worker）**: Hono 4 / wrangler 4
 
 ## よく使うコマンド
 
 ```bash
 task ci            # GitHub Actions と同じ品質チェックを全系統実行（変更後はまずこれ）
 task generate:api  # OpenAPI定義とフロントエンドのAPI Hooksをまとめて再生成
-task dev           # Postgres が healthy になるのを待ってから backend / worker / frontend を起動
-task db:up         # Postgres だけ起動
+task dev           # backend（Worker）と frontend を起動
+task db:migrate    # GORM の AutoMigrate でスキーマを適用
+task db:up         # ローカル検証用の Postgres を起動
 task db:down       # 停止（データは残る）
 task db:reset      # 停止してデータも削除
 task --list        # タスク一覧
@@ -100,13 +101,33 @@ cd frontend && npm run generate:api     # backend/docs/swagger.yaml → src/api/
   `internal/httpapi/router.go` にあります。
 - 生成された `backend/docs` はコミット対象です（frontend 側の生成に必要なため）。
   再生成後は差分をコミットに含めてください。
-- Swagger UI はローカルでは http://localhost:8080/swagger/index.html で確認できます。
+- Swagger UI は配信していません。swaggo のランタイム登録は Wasm を 30MB 近く
+  肥大化させるため、Workers 向けビルドから除外しています。生成された
+  `backend/docs/swagger.yaml` を手元のビューアで開いて確認してください。
 
 ## 注意点
 
 - **`backend/docs/` と `frontend/src/api/generated/` は手で編集しない。** どちらも生成物です。
   上の「API 定義の生成フロー」を参照してください。
-- DB スキーマはマイグレーションファイルではなく、GORM の `AutoMigrate`
-  （`backend/internal/database/database.go`）で適用されます。スキーマ変更は
-  `backend/internal/domain` の構造体を編集します。
+- DB スキーマはマイグレーションファイルではなく、GORM の `AutoMigrate` で適用されます。
+  スキーマ変更は `backend/internal/domain` の構造体を編集し、`cmd/migrate` を実行します。
+  Workers 上の API はマイグレーションを実行しません。
+
+  ```bash
+  cd backend && DATABASE_URL='postgres://...' go run ./cmd/migrate
+  ```
+
+- ローカル開発は `wrangler dev`（`task dev`）を使います。`go run ./cmd/server` は
+  `workers.Serve` が Workers のランタイムを要求するため起動しません。
+  接続先は `backend/.dev.vars` で指定します（`connect()` は localhost に到達できないため、
+  ローカルの Postgres ではなくマネージドPostgresを指定する）。
+
+- Go は `GOOS=js GOARCH=wasm` でビルドして Workers に載せています。このため次の制約があります。
+  - DB 接続はリクエストごとに開閉する（TCP ソケットをグローバルに保持できないため）
+  - PostgreSQL へは Cloudflare の `connect()` 経由で接続する
+    （`internal/database/dialer_js.go`）。`localhost` や private IP には到達できません
+  - `os.Getenv` ではなく `internal/env` の `env.Get` を使う（Workers の環境変数は
+    プロセスの環境ではなく `env` バインディングで渡るため）
+  - swaggo のランタイム登録は Wasm を肥大化させるため、js/wasm ビルドから除外しています
+    （`cmd/server/docs_default.go`）
 - lefthook を入れると commit / push 時に上記チェックが自動で走ります（`lefthook install`）。

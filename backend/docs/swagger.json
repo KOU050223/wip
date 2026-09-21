@@ -6,7 +6,7 @@
         "contact": {},
         "version": "1.0"
     },
-    "host": "localhost:8080",
+    "host": "wip-backend.uozumi05.workers.dev",
     "basePath": "/",
     "paths": {
         "/api/rankings": {
