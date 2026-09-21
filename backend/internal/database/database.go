@@ -2,14 +2,44 @@ package database
 
 import (
 	"context"
+	"fmt"
+	"os"
 
 	"github.com/KOU050223/wip/backend/internal/domain"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/stdlib"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 )
 
-func Open(databaseURL string) (*gorm.DB, error) {
-	return gorm.Open(postgres.Open(databaseURL), &gorm.Config{})
+// Open はリクエストスコープの DB 接続を開く。
+//
+// Cloudflare Workers では TCP ソケットをグローバルに保持できないため、pgx の
+// ダイヤラを Workers の connect() に差し替えたうえで、呼び出しごとに接続を開く。
+// 返り値の closer は必ず呼び出すこと。
+func Open(ctx context.Context) (*gorm.DB, func(), error) {
+	databaseURL := os.Getenv("DATABASE_URL")
+	if databaseURL == "" {
+		return nil, func() {}, fmt.Errorf("DATABASE_URL is required")
+	}
+
+	pgxConfig, err := pgx.ParseConfig(databaseURL)
+	if err != nil {
+		return nil, func() {}, fmt.Errorf("failed to parse DATABASE_URL: %w", err)
+	}
+
+	// Workers 上では Go の net.Dial が使えないため、ビルドターゲットに応じた
+	// ダイヤラを差し込む（dialer_js.go / dialer_default.go）。
+	applyDialer(pgxConfig)
+
+	sqlDB := stdlib.OpenDB(*pgxConfig)
+	db, err := gorm.Open(postgres.New(postgres.Config{Conn: sqlDB}), &gorm.Config{})
+	if err != nil {
+		_ = sqlDB.Close()
+		return nil, func() {}, err
+	}
+
+	return db, func() { _ = sqlDB.Close() }, nil
 }
 
 func Migrate(db *gorm.DB) error {

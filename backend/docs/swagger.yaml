@@ -38,7 +38,7 @@ definitions:
       score:
         type: integer
     type: object
-host: localhost:8080
+host: api.uomi.dev
 info:
   contact: {}
   description: Score management API.

@@ -1,38 +1,16 @@
-import { Container, getRandom } from '@cloudflare/containers';
-import { env } from 'cloudflare:workers';
+// workers-assets-gen が生成する Go/Wasm のエントリポイント。
+// `npm run build` で ./build 以下に生成されるため、リポジトリにはコミットしない。
+// @ts-expect-error -- 生成物のため型定義を持たない。
+import goWorker from '../build/worker.mjs';
 import { createApp } from './app';
 
-const INSTANCE_COUNT = 2;
-export class BackendContainer extends Container {
-  defaultPort = 8080;
-  sleepAfter = '5m';
-  envVars = {
-    DATABASE_URL: env.DATABASE_URL,
-    CORS_ALLOW_ORIGINS: env.CORS_ALLOW_ORIGINS,
-    UPSTASH_REDIS_URL: env.UPSTASH_REDIS_URL,
-    GUEST_SESSION_SECRET: env.GUEST_SESSION_SECRET,
-  };
-
-  override onStart() {
-    console.log('backend container started');
-  }
-
-  override onStop(stopParams: { exitCode: number; reason: string }) {
-    console.log('backend container stopped', stopParams);
-  }
-
-  override onError(error: unknown) {
-    console.error('backend container error:', error);
-  }
-}
-
-const app = createApp(async (request, env) => {
-  const container = await getRandom(env.BACKEND, INSTANCE_COUNT);
-  return container.fetch(request);
-});
+// Hono のルーター構築は 1 度で済むため、モジュールスコープで組み立てる。
+// ExecutionContext はリクエストごとに異なるので、Hono の Context 経由で
+// 受け取って Go 側へ渡す（同一 isolate で複数リクエストが並行しても混ざらない）。
+const app = createApp((request, env, ctx) => goWorker.fetch(request, env, ctx));
 
 export default {
-  async fetch(request: Request, env: Env): Promise<Response> {
-    return app.fetch(request, env);
+  async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+    return app.fetch(request, env, ctx);
   },
 } satisfies ExportedHandler<Env>;

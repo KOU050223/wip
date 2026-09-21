@@ -8,10 +8,11 @@
     "dev": "wrangler dev",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "cf-typegen": "wrangler types"
+    "cf-typegen": "wrangler types",
+    "build:go": "go run github.com/syumai/workers-go/cmd/workers-assets-gen -mode=go -o ./build && GOOS=js GOARCH=wasm go build -ldflags=\"-s -w\" -o ./build/app.wasm ./cmd/server",
+    "build": "npm run build:go"
   },
   "dependencies": {
-    "@cloudflare/containers": "^0.3.7",
     "hono": "^4.13.5"
   },
   "devDependencies": {

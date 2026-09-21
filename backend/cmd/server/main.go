@@ -1,87 +1,45 @@
 package main
 
 import (
-	"context"
 	"log"
-	"os"
-	"time"
-
-	_ "github.com/KOU050223/wip/backend/docs"
+	"net/http"
 
 	"github.com/KOU050223/wip/backend/internal/config"
 	"github.com/KOU050223/wip/backend/internal/database"
 	"github.com/KOU050223/wip/backend/internal/httpapi"
-	"github.com/KOU050223/wip/backend/internal/realtime"
 	"github.com/KOU050223/wip/backend/internal/repository"
 	"github.com/KOU050223/wip/backend/internal/usecase"
-	"github.com/joho/godotenv"
-	"github.com/redis/go-redis/v9"
-	swaggerFiles "github.com/swaggo/files"
-	ginSwagger "github.com/swaggo/gin-swagger"
+	"github.com/syumai/workers-go"
 )
 
 // @title           Score API
 // @version         1.0
 // @description     Score management API.
-// @host            localhost:8080
+// @host            api.uomi.dev
 // @BasePath        /
 
+// Cloudflare Workers ではリクエストの外側で I/O を行えず、TCP ソケットを
+// グローバルに保持して使い回すこともできない。そのため DB 接続はグローバルに
+// 張らず、リクエストごとに開いて閉じる。
 func main() {
-	_ = godotenv.Load()
+	handler := http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		db, closeDB, err := database.Open(req.Context())
+		if err != nil {
+			log.Printf("failed to connect database: %v", err)
+			http.Error(w, `{"status":"error","database":"unreachable"}`, http.StatusServiceUnavailable)
+			return
+		}
+		defer closeDB()
 
-	databaseURL := os.Getenv("DATABASE_URL")
-	if databaseURL == "" {
-		log.Fatal("DATABASE_URL is required")
-	}
+		scoreRepository := repository.NewGormScoreRepository(db)
+		scoreUsecase := usecase.NewScoreUsecase(scoreRepository)
+		router := httpapi.NewRouter(
+			scoreUsecase,
+			config.AllowOrigins(),
+			database.Ping(db),
+		)
+		router.ServeHTTP(w, req)
+	})
 
-	db, err := database.Open(databaseURL)
-	if err != nil {
-		log.Fatalf("failed to connect database: %v", err)
-	}
-
-	if err := database.Migrate(db); err != nil {
-		log.Fatalf("failed to migrate database: %v", err)
-	}
-
-	redisURL := os.Getenv("UPSTASH_REDIS_URL")
-	if redisURL == "" {
-		log.Fatal("UPSTASH_REDIS_URL is required")
-	}
-	guestSessionSecret := os.Getenv("GUEST_SESSION_SECRET")
-	if guestSessionSecret == "" {
-		log.Fatal("GUEST_SESSION_SECRET is required")
-	}
-	redisOptions, err := redis.ParseURL(redisURL)
-	if err != nil {
-		log.Fatalf("failed to parse UPSTASH_REDIS_URL: %v", err)
-	}
-	redisClient := redis.NewClient(redisOptions)
-	defer redisClient.Close()
-	redisContext, cancelRedis := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancelRedis()
-	if err := redisClient.Ping(redisContext).Err(); err != nil {
-		log.Fatalf("failed to connect redis: %v", err)
-	}
-
-	scoreRepository := repository.NewGormScoreRepository(db)
-	scoreUsecase := usecase.NewScoreUsecase(scoreRepository)
-	router := httpapi.NewRouterWithRealtimeAndRoomsAndReadiness(
-		scoreUsecase,
-		config.AllowOrigins(),
-		database.Ping(db),
-		realtime.NewMatchmakingService(realtime.NewRedisQueue(redisClient)),
-		realtime.NewGuestSessions(guestSessionSecret),
-		realtime.NewRedisRoom(redisClient),
-		func(ctx context.Context) error { return redisClient.Ping(ctx).Err() },
-	)
-
-	router.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
-	port := os.Getenv("PORT")
-	if port == "" {
-		port = "8080"
-	}
-
-	if err := router.Run(":" + port); err != nil {
-		log.Fatalf("failed to run server: %v", err)
-	}
+	workers.Serve(handler)
 }

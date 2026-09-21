@@ -8,8 +8,8 @@ const env = {
 
 describe("createApp", () => {
   it("answers an allowed AI preflight request without forwarding it to the container", async () => {
-    const fetchContainer = vi.fn();
-    const app = createApp(fetchContainer);
+    const fetchBackend = vi.fn();
+    const app = createApp(fetchBackend);
 
     const response = await app.request(
       "https://api.example/ai/taunt",
@@ -25,12 +25,12 @@ describe("createApp", () => {
 
     expect(response.status).toBe(204);
     expect(response.headers.get("Access-Control-Allow-Origin")).toBe("https://game.example");
-    expect(fetchContainer).not.toHaveBeenCalled();
+    expect(fetchBackend).not.toHaveBeenCalled();
   });
 
   it("keeps an unlisted local origin from reaching the container during AI preflight", async () => {
-    const fetchContainer = vi.fn();
-    const app = createApp(fetchContainer);
+    const fetchBackend = vi.fn();
+    const app = createApp(fetchBackend);
 
     const response = await app.request(
       "https://api.example/ai/taunt",
@@ -46,16 +46,16 @@ describe("createApp", () => {
 
     expect(response.status).toBe(204);
     expect(response.headers.get("Access-Control-Allow-Origin")).toBeNull();
-    expect(fetchContainer).not.toHaveBeenCalled();
+    expect(fetchBackend).not.toHaveBeenCalled();
   });
 
-  it("forwards non-AI requests to the existing container", async () => {
-    const fetchContainer = vi.fn().mockResolvedValue(new Response("from container"));
-    const app = createApp(fetchContainer);
+  it("forwards non-AI requests to the Go handler", async () => {
+    const fetchBackend = vi.fn().mockResolvedValue(new Response("from go handler"));
+    const app = createApp(fetchBackend);
 
     const response = await app.request("https://api.example/api/rankings", {}, env);
 
-    await expect(response.text()).resolves.toBe("from container");
-    expect(fetchContainer).toHaveBeenCalledTimes(1);
+    await expect(response.text()).resolves.toBe("from go handler");
+    expect(fetchBackend).toHaveBeenCalledTimes(1);
   });
 });
