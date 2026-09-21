@@ -37,10 +37,11 @@ jobs:
           cache-dependency-path: frontend/package-lock.json
       - run: npm ci
         working-directory: frontend
+      # API の接続先は frontend/.env.production で管理する。
+      # ここで env を上書きすると、変数未設定時に空文字で潰れて
+      # 同一オリジンへのリクエストになってしまう。
       - run: npm run build
         working-directory: frontend
-        env:
-          VITE_API_BASE_URL: ${{ vars.VITE_API_BASE_URL }}
 
       # versions upload は新しいバージョンをアップロードするだけで、
       # 本番トラフィックの向き先は変更しない。
@@ -93,10 +94,11 @@ jobs:
           cache-dependency-path: frontend/package-lock.json
       - run: npm ci
         working-directory: frontend
+      # API の接続先は frontend/.env.production で管理する。
+      # ここで env を上書きすると、変数未設定時に空文字で潰れて
+      # 同一オリジンへのリクエストになってしまう。
       - run: npm run build
         working-directory: frontend
-        env:
-          VITE_API_BASE_URL: ${{ vars.VITE_API_BASE_URL }}
 
       - name: Deploy to production
         id: deploy

@@ -42,8 +42,9 @@ PostgreSQL
 ```bash
 task ci            # GitHub Actions と同じ品質チェックを全系統実行（変更後はまずこれ）
 task generate:api  # OpenAPI定義とフロントエンドのAPI Hooksをまとめて再生成
-task dev           # Postgres が healthy になるのを待ってから backend / worker / frontend を起動
-task db:up         # Postgres だけ起動
+task dev           # backend（Worker）と frontend を起動
+task db:migrate    # GORM の AutoMigrate でスキーマを適用
+task db:up         # ローカル検証用の Postgres を起動
 task db:down       # 停止（データは残る）
 task db:reset      # 停止してデータも削除
 task --list        # タスク一覧
@@ -100,7 +101,9 @@ cd frontend && npm run generate:api     # backend/docs/swagger.yaml → src/api/
   `internal/httpapi/router.go` にあります。
 - 生成された `backend/docs` はコミット対象です（frontend 側の生成に必要なため）。
   再生成後は差分をコミットに含めてください。
-- Swagger UI はローカルでは http://localhost:8080/swagger/index.html で確認できます。
+- Swagger UI は配信していません。swaggo のランタイム登録は Wasm を 30MB 近く
+  肥大化させるため、Workers 向けビルドから除外しています。生成された
+  `backend/docs/swagger.yaml` を手元のビューアで開いて確認してください。
 
 ## 注意点
 
@@ -113,6 +116,11 @@ cd frontend && npm run generate:api     # backend/docs/swagger.yaml → src/api/
   ```bash
   cd backend && DATABASE_URL='postgres://...' go run ./cmd/migrate
   ```
+
+- ローカル開発は `wrangler dev`（`task dev`）を使います。`go run ./cmd/server` は
+  `workers.Serve` が Workers のランタイムを要求するため起動しません。
+  接続先は `backend/.dev.vars` で指定します（`connect()` は localhost に到達できないため、
+  ローカルの Postgres ではなくマネージドPostgresを指定する）。
 
 - Go は `GOOS=js GOARCH=wasm` でビルドして Workers に載せています。このため次の制約があります。
   - DB 接続はリクエストごとに開閉する（TCP ソケットをグローバルに保持できないため）

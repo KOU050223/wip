@@ -33,8 +33,19 @@ func Open(ctx context.Context) (*gorm.DB, func(), error) {
 	applyDialer(pgxConfig)
 
 	sqlDB := stdlib.OpenDB(*pgxConfig)
-	db, err := gorm.Open(postgres.New(postgres.Config{Conn: sqlDB}), &gorm.Config{})
+
+	// GORM は初期化時に ctx を渡せない Ping を行う。DB が接続を受けたまま応答しない
+	// 場合にリクエストのキャンセルが効かなくなるため、自動 Ping は無効化して
+	// 呼び出し元の ctx で明示的に疎通を確認する。
+	db, err := gorm.Open(
+		postgres.New(postgres.Config{Conn: sqlDB}),
+		&gorm.Config{DisableAutomaticPing: true},
+	)
 	if err != nil {
+		_ = sqlDB.Close()
+		return nil, func() {}, err
+	}
+	if err := sqlDB.PingContext(ctx); err != nil {
 		_ = sqlDB.Close()
 		return nil, func() {}, err
 	}

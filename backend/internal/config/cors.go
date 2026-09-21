@@ -2,6 +2,8 @@ package config
 
 import (
 	"cmp"
+	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -87,6 +89,48 @@ func splitOrigin(origin string) (scheme, host string, ok bool) {
 	return scheme, host, host != ""
 }
 
+// corsAllowMethods と corsAllowHeaders は CORSMiddleware と HandlePreflight で
+// 同じ値を返すために共有する。
+var (
+	corsAllowMethods = []string{"GET", "POST", "DELETE", "OPTIONS"}
+	corsAllowHeaders = []string{"Origin", "Content-Type", "Accept", "Authorization"}
+)
+
+// corsMaxAge は preflight のキャッシュ時間。
+const corsMaxAge = 12 * time.Hour
+
+// HandlePreflight は CORS preflight を処理し、応答したかどうかを返す。
+//
+// preflight は DB を必要としないため、DB 接続を開く前にここで終端する。
+// preflight でないリクエストや、許可されていないオリジンからの preflight は
+// false を返し、通常の経路（CORSMiddleware）に委ねる。
+func HandlePreflight(w http.ResponseWriter, req *http.Request, allowOrigins []string) bool {
+	if req.Method != http.MethodOptions {
+		return false
+	}
+	// Access-Control-Request-Method を伴わない OPTIONS は preflight ではない。
+	if req.Header.Get("Access-Control-Request-Method") == "" {
+		return false
+	}
+	origin := req.Header.Get("Origin")
+	if origin == "" || !OriginAllowed(allowOrigins, origin) {
+		return false
+	}
+
+	header := w.Header()
+	header.Set("Access-Control-Allow-Origin", origin)
+	header.Set("Access-Control-Allow-Methods", strings.Join(corsAllowMethods, ","))
+	header.Set("Access-Control-Allow-Headers", strings.Join(corsAllowHeaders, ","))
+	header.Set("Access-Control-Allow-Credentials", "true")
+	header.Set("Access-Control-Max-Age", strconv.Itoa(int(corsMaxAge.Seconds())))
+	// オリジンごとに応答が変わることをキャッシュに伝える。
+	header.Add("Vary", "Origin")
+	header.Add("Vary", "Access-Control-Request-Method")
+	header.Add("Vary", "Access-Control-Request-Headers")
+	w.WriteHeader(http.StatusNoContent)
+	return true
+}
+
 // CORSMiddleware は指定したオリジンを許可するCORSミドルウェアを生成する。
 func CORSMiddleware(allowOrigins []string) gin.HandlerFunc {
 	config := cors.DefaultConfig()
@@ -95,9 +139,9 @@ func CORSMiddleware(allowOrigins []string) gin.HandlerFunc {
 	config.AllowOriginFunc = func(origin string) bool {
 		return OriginAllowed(allowOrigins, origin)
 	}
-	config.AllowMethods = []string{"GET", "POST", "DELETE", "OPTIONS"}
-	config.AllowHeaders = []string{"Origin", "Content-Type", "Accept", "Authorization"}
+	config.AllowMethods = corsAllowMethods
+	config.AllowHeaders = corsAllowHeaders
 	config.AllowCredentials = true
-	config.MaxAge = 12 * time.Hour
+	config.MaxAge = corsMaxAge
 	return cors.New(config)
 }
