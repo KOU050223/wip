@@ -164,7 +164,7 @@ const docTemplate = `{
 // SwaggerInfo holds exported Swagger Info so clients can modify it
 var SwaggerInfo = &swag.Spec{
 	Version:          "1.0",
-	Host:             "api.uomi.dev",
+	Host:             "wip-backend.uozumi05.workers.dev",
 	BasePath:         "/",
 	Schemes:          []string{},
 	Title:            "Score API",

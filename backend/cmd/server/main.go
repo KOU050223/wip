@@ -15,7 +15,7 @@ import (
 // @title           Score API
 // @version         1.0
 // @description     Score management API.
-// @host            api.uomi.dev
+// @host            wip-backend.uozumi05.workers.dev
 // @BasePath        /
 
 // Cloudflare Workers ではリクエストの外側で I/O を行えず、TCP ソケットを

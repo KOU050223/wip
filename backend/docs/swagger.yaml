@@ -38,7 +38,7 @@ definitions:
       score:
         type: integer
     type: object
-host: api.uomi.dev
+host: wip-backend.uozumi05.workers.dev
 info:
   contact: {}
   description: Score management API.

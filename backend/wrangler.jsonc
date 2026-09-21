@@ -14,10 +14,10 @@
     "binding": "AI",
   },
 
-  // Preview URL は workers.dev のサブドメインで配信されるため、両方を明示的に有効化する。
+  // API はフロントエンドから呼ばれるだけでユーザーが直接開くものではないため、
+  // カスタムドメインは設定せず workers.dev のURLで配信する。
   "workers_dev": true,
   "preview_urls": true,
-  "routes": [{ "pattern": "api.uomi.dev", "custom_domain": true }],
 
   // Go 側へ渡す非機密の設定値。
   // DATABASE_URL は機密なので vars ではなく `wrangler secret put` で登録する。
