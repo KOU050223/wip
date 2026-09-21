@@ -3,9 +3,9 @@ package database
 import (
 	"context"
 	"fmt"
-	"os"
 
 	"github.com/KOU050223/wip/backend/internal/domain"
+	"github.com/KOU050223/wip/backend/internal/env"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/stdlib"
 	"gorm.io/driver/postgres"
@@ -18,7 +18,7 @@ import (
 // ダイヤラを Workers の connect() に差し替えたうえで、呼び出しごとに接続を開く。
 // 返り値の closer は必ず呼び出すこと。
 func Open(ctx context.Context) (*gorm.DB, func(), error) {
-	databaseURL := os.Getenv("DATABASE_URL")
+	databaseURL := env.Get("DATABASE_URL")
 	if databaseURL == "" {
 		return nil, func() {}, fmt.Errorf("DATABASE_URL is required")
 	}

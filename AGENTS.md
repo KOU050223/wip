@@ -10,8 +10,8 @@
 | パス | 内容 |
 | --- | --- |
 | `frontend/` | React SPA（Vite）。Cloudflare Workers へデプロイ |
-| `backend/cmd`, `backend/internal` | Go の API サーバー（Gin + GORM + PostgreSQL）。Cloudflare Containers へデプロイ |
-| `backend/worker` | Cloudflare Worker（Hono）。コンテナへのルーティングと Workers AI を担当 |
+| `backend/cmd`, `backend/internal` | Go の API サーバー（Gin + GORM + PostgreSQL）。js/wasm にビルドして Cloudflare Workers へデプロイ |
+| `backend/worker` | Cloudflare Worker（Hono）。Go/Wasm へのルーティングと Workers AI を担当 |
 | `docs/` | 設計・デプロイ手順 |
 
 Go 側のアーキテクチャはレイヤードです。
@@ -34,8 +34,8 @@ PostgreSQL
 - **frontend**: React 19 / Vite 8 / react-router-dom 7 / TanStack Query 5 /
   three + `@react-three/fiber` `@react-three/drei` `@react-three/xr` / Tailwind CSS v4 /
   Vitest 4 / TypeScript 6
-- **backend（Go）**: Go 1.27 / Gin / GORM / PostgreSQL 17 / Redis（マッチメイキング）
-- **backend（Worker）**: Hono 4 / `@cloudflare/containers` / wrangler 4
+- **backend（Go）**: Go 1.27 / Gin / GORM / PostgreSQL（Neon）/ syumai/workers-go
+- **backend（Worker）**: Hono 4 / wrangler 4
 
 ## よく使うコマンド
 
@@ -106,7 +106,20 @@ cd frontend && npm run generate:api     # backend/docs/swagger.yaml → src/api/
 
 - **`backend/docs/` と `frontend/src/api/generated/` は手で編集しない。** どちらも生成物です。
   上の「API 定義の生成フロー」を参照してください。
-- DB スキーマはマイグレーションファイルではなく、GORM の `AutoMigrate`
-  （`backend/internal/database/database.go`）で適用されます。スキーマ変更は
-  `backend/internal/domain` の構造体を編集します。
+- DB スキーマはマイグレーションファイルではなく、GORM の `AutoMigrate` で適用されます。
+  スキーマ変更は `backend/internal/domain` の構造体を編集し、`cmd/migrate` を実行します。
+  Workers 上の API はマイグレーションを実行しません。
+
+  ```bash
+  cd backend && DATABASE_URL='postgres://...' go run ./cmd/migrate
+  ```
+
+- Go は `GOOS=js GOARCH=wasm` でビルドして Workers に載せています。このため次の制約があります。
+  - DB 接続はリクエストごとに開閉する（TCP ソケットをグローバルに保持できないため）
+  - PostgreSQL へは Cloudflare の `connect()` 経由で接続する
+    （`internal/database/dialer_js.go`）。`localhost` や private IP には到達できません
+  - `os.Getenv` ではなく `internal/env` の `env.Get` を使う（Workers の環境変数は
+    プロセスの環境ではなく `env` バインディングで渡るため）
+  - swaggo のランタイム登録は Wasm を肥大化させるため、js/wasm ビルドから除外しています
+    （`cmd/server/docs_default.go`）
 - lefthook を入れると commit / push 時に上記チェックが自動で走ります（`lefthook install`）。

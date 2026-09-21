@@ -2,10 +2,10 @@ package config
 
 import (
 	"cmp"
-	"os"
 	"strings"
 	"time"
 
+	"github.com/KOU050223/wip/backend/internal/env"
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 )
@@ -16,7 +16,7 @@ const defaultAllowOrigins = "http://localhost:3000,http://localhost:5173,https:/
 // AllowOrigins は環境変数CORS_ALLOW_ORIGINSをカンマ区切りで解釈して許可オリジンを返す。
 // 未設定の場合はローカル開発用のオリジンにフォールバックする。
 func AllowOrigins() []string {
-	raw := cmp.Or(os.Getenv("CORS_ALLOW_ORIGINS"), defaultAllowOrigins)
+	raw := cmp.Or(env.Get("CORS_ALLOW_ORIGINS"), defaultAllowOrigins)
 
 	var origins []string
 	for origin := range strings.SplitSeq(raw, ",") {

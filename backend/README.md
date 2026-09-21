@@ -1,6 +1,6 @@
 # backend
 
-Goを使用して、ゲームのスコア保存・ランキング取得・将来的なリアルタイム対戦機能を構築する。
+Goを使用して、ゲームのスコア保存・ランキング取得を行うAPIを構築する。
 
 わかりやすさ重視でレイヤードアーキテクチャを採用する予定です。
 
@@ -59,7 +59,8 @@ MVPではHTTP APIのみでもよい。WebSocketを使う場合は、Room管理�
 
 1. GinでHTTPサーバーを起動し、ルーティングを定義する。
 2. GORMでPostgreSQLに接続し、スコア保存に必要な最小テーブルをマイグレーションとして作る。
-3. MVPではHTTP APIのみで進め、WebSocketのPoCは対戦機能を作る段階で検討する。
+3. HTTP APIのみで進める。Workers 上では WebSocket を Durable Object で実装する必要があるため、
+   対戦機能を作る場合は別途設計する。
 4. 次のAPIを実装し、`go test ./...` が通る状態にする。
 
 ```text
@@ -91,10 +92,11 @@ go test ./...
 | `DATABASE_URL` | 必須 | なし | PostgreSQLの接続先。未設定の場合は起動時に終了する。 |
 | `PORT` | 任意 | `8080` | HTTPサーバーの待ち受けポート。 |
 | `CORS_ALLOW_ORIGINS` | 任意 | `http://localhost:3000,http://localhost:5173` | CORSで許可するオリジン。カンマ区切りで複数指定できる。`*` を指定するとすべてのオリジンを許可する。 |
-| `UPSTASH_REDIS_URL` | 必須 | なし | Upstash Redis の TLS 接続URL。マッチング待機列とコンテナ間のリアルタイム状態に使用する。 |
-| `GUEST_SESSION_SECRET` | 必須 | なし | ゲストセッションCookieの署名鍵。十分に長いランダム値を設定する。 |
 
-`GET /livez` はプロセスが起動していることだけを返す。ロードバランサのreadinessには、PostgreSQLとRedisの疎通を確認する `GET /readyz` を使用する。
+`GET /health` は PostgreSQL への疎通を確認し、失敗時は 503 を返す。
+
+Cloudflare Workers ではリクエストの外側で I/O を行えず、TCP ソケットをグローバルに
+保持することもできない。そのため DB 接続はリクエストごとに開いて閉じる。
 
 `.env.example` をコピーして `.env` を作ると、値をシェルに書かずに開発できる。
 
@@ -127,12 +129,12 @@ go run ./cmd/server
 
 ## デプロイ
 
-Cloudflare Containers へデプロイする。手順・構成・既知の課題は
+Cloudflare Workers へデプロイする。Go は [syumai/workers-go](https://github.com/syumai/workers-go)
+で js/wasm にビルドし、`worker/index.ts` の Hono から呼び出す。手順・構成・既知の課題は
 [docs/backend-deploy.md](../docs/backend-deploy.md) を参照。
 
 ```bash
 task deploy:backend            # 本番へデプロイ
-task dev:backend:container     # Worker＋コンテナをローカルで起動
 ```
 
 `main` への push で自動デプロイされるため、通常は手動実行は不要。
@@ -141,4 +143,4 @@ task dev:backend:container     # Worker＋コンテナをローカルで起動
 
 - ゲームのスコアを保存する
 - ランキングを取得する
-- 余裕があれば、WebSocketで対人スコアや誘惑イベントを同期する
+- （対戦機能は利用実績がないため削除済み。再開する場合は Durable Object で設計する）

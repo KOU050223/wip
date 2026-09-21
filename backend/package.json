@@ -19,5 +19,9 @@
     "typescript": "~6.0.2",
     "vitest": "^4.1.11",
     "wrangler": "^4.126.0"
+  },
+  "allowScripts": {
+    "workerd@1.20260825.1": true,
+    "esbuild@0.28.1": true
   }
 }

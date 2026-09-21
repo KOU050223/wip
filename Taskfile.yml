@@ -93,16 +93,16 @@ tasks:
       - npm run deploy:preview
 
   deploy:backend:
-    desc: バックエンドをCloudflare Containersの本番へデプロイ（Docker起動が必要）
+    desc: バックエンドをCloudflare Workersの本番へデプロイ
     dir: backend
     cmds:
       - npm run deploy
 
-  dev:backend:container:
-    desc: Worker＋コンテナをローカルで起動して本番構成を再現（Docker起動が必要）
+  db:migrate:
+    desc: GORMのAutoMigrateでスキーマを適用（DATABASE_URL を指定して実行する）
     dir: backend
     cmds:
-      - npm run dev
+      - go run ./cmd/migrate
 
   ci:
     desc: GitHub Actions と同じ品質チェックを実行

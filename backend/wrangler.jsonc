@@ -25,6 +25,19 @@
     "CORS_ALLOW_ORIGINS": "https://wip-frontend.uomi.dev,https://wip-frontend.uozumi05.workers.dev",
   },
 
+  // Containers から Workers へ移行したため、コンテナ用の Durable Object を破棄する。
+  // v1 は適用済みのため、履歴として残したうえで v2 で削除する。
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["BackendContainer"],
+    },
+    {
+      "tag": "v2",
+      "deleted_classes": ["BackendContainer"],
+    },
+  ],
+
   "observability": {
     "enabled": true,
   },
