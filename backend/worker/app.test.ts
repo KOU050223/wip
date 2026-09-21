@@ -58,4 +58,40 @@ describe("createApp", () => {
     await expect(response.text()).resolves.toBe("from go handler");
     expect(fetchBackend).toHaveBeenCalledTimes(1);
   });
+
+  describe("ワイルドカードのオリジン", () => {
+    // Workers のプレビューURLはデプロイごとにホスト名が変わるため、
+    // 列挙ではなくサブドメインのパターンで許可する。
+    const wildcardEnv = {
+      CORS_ALLOW_ORIGINS: "https://wip-frontend.uomi.dev,https://*.uozumi05.workers.dev",
+    } as unknown as Env;
+
+    const preflight = (origin: string) =>
+      createApp(vi.fn()).request(
+        "https://api.example/ai/taunt",
+        {
+          method: "OPTIONS",
+          headers: { Origin: origin, "Access-Control-Request-Method": "POST" },
+        },
+        wildcardEnv,
+      );
+
+    it.each([
+      ["プレビューURL", "https://036c9650-wip-frontend.uozumi05.workers.dev"],
+      ["本番のカスタムドメイン", "https://wip-frontend.uomi.dev"],
+    ])("%s を許可する", async (_name, origin) => {
+      const response = await preflight(origin);
+      expect(response.headers.get("Access-Control-Allow-Origin")).toBe(origin);
+    });
+
+    it.each([
+      ["未登録のドメイン", "https://evil.example.com"],
+      ["サフィックスを装ったドメイン", "https://wip-frontend.uozumi05.workers.dev.evil.com"],
+      ["部分一致を狙ったドメイン", "https://evil-uozumi05.workers.dev"],
+      ["スキームが違う", "http://wip-frontend.uomi.dev"],
+    ])("%s を拒否する", async (_name, origin) => {
+      const response = await preflight(origin);
+      expect(response.headers.get("Access-Control-Allow-Origin")).toBeNull();
+    });
+  });
 });

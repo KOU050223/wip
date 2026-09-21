@@ -22,7 +22,10 @@
   // Go 側へ渡す非機密の設定値。
   // DATABASE_URL は機密なので vars ではなく `wrangler secret put` で登録する。
   "vars": {
-    "CORS_ALLOW_ORIGINS": "https://wip-frontend.uomi.dev,https://wip-frontend.uozumi05.workers.dev",
+    // `https://*.uozumi05.workers.dev` は Workers のプレビューURL
+    // （`<ハッシュ>-wip-frontend.uozumi05.workers.dev`）を受けるための指定。
+    // デプロイごとにホスト名が変わるため列挙では追随できない。
+    "CORS_ALLOW_ORIGINS": "https://wip-frontend.uomi.dev,https://wip-frontend.uozumi05.workers.dev,https://*.uozumi05.workers.dev",
   },
 
   // Containers から Workers へ移行したため、コンテナ用の Durable Object を破棄する。
